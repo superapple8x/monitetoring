@@ -36,3 +36,5 @@ python_api/dump.rdb
 .idea/
 *.swp
 *.swo
+
+/home/pepper/monitetoring/plans
