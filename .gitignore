@@ -30,6 +30,8 @@ rust_engine/target/
 
 # Redis dump file
 python_api/dump.rdb
+dump.rdb
+
 
 # IDE / Editor specific
 .vscode/
@@ -38,3 +40,5 @@ python_api/dump.rdb
 *.swo
 
 /home/pepper/monitetoring/plans
+plans/
+
