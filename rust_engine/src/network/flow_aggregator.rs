@@ -1,0 +1,323 @@
+// src/network/flow_aggregator.rs
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::time::{Duration, SystemTime};
+use tokio::time::{interval, Interval};
+use serde::Serialize; // Added for TopTalker, ProtocolStats, FlowSummary, BandwidthStats
+
+// Assuming NetworkFlow and PacketDirection are in a sibling module 'flow'
+use super::flow::{NetworkFlow, PacketDirection, ConnectionState}; // Adjusted path
+
+pub struct FlowAggregator {
+    flows: HashMap<FlowKey, NetworkFlow>,
+    flow_timeout: Duration,
+    // aggregation_window: Duration, // This was in the user's code but not used
+    
+    // Top talkers tracking
+    top_talkers_by_bytes: Vec<TopTalker>,
+    top_talkers_by_packets: Vec<TopTalker>,
+    protocol_distribution: HashMap<u8, ProtocolStats>,
+    
+    // Cleanup timer
+    cleanup_timer: Interval,
+    aggregation_timer: Interval, // Added for periodic aggregation
+}
+
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+pub struct FlowKey {
+    pub src_ip: IpAddr,
+    pub dst_ip: IpAddr,
+    pub src_port: u16,
+    pub dst_port: u16,
+    pub protocol: u8,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TopTalker {
+    pub ip: IpAddr,
+    pub bytes_total: u64,
+    pub packets_total: u64,
+    pub flows_count: u32,
+    pub protocols: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProtocolStats {
+    pub protocol: u8,
+    pub flows_count: u32,
+    pub bytes_total: u64,
+    pub packets_total: u64,
+    pub percentage_of_total_flows: f64, // Renamed for clarity
+    pub percentage_of_total_bytes: f64, // Added for more detail
+}
+
+#[derive(Debug, Serialize)]
+pub struct FlowSummary {
+    pub timestamp: SystemTime,
+    pub total_flows_in_window: u32, // Number of flows active during this aggregation window
+    pub active_flows_count: u32, // Current number of active flows in the map
+    pub top_talkers_bytes: Vec<TopTalker>,
+    pub top_talkers_packets: Vec<TopTalker>,
+    pub protocol_distribution: Vec<ProtocolStats>,
+    pub bandwidth_usage: BandwidthStats,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BandwidthStats {
+    pub total_bytes_per_sec: f64,
+    pub total_packets_per_sec: f64,
+    pub peak_bandwidth_in_window: f64, // Peak observed during this window
+    pub average_bandwidth_in_window: f64, // Average during this window
+}
+
+impl FlowAggregator {
+    pub fn new(flow_timeout_secs: u64, aggregation_window_secs: u64, cleanup_interval_secs: u64) -> Self {
+        Self {
+            flows: HashMap::new(),
+            flow_timeout: Duration::from_secs(flow_timeout_secs),
+            // aggregation_window: Duration::from_secs(aggregation_window_secs), // Not directly used for tick
+            top_talkers_by_bytes: Vec::new(),
+            top_talkers_by_packets: Vec::new(),
+            protocol_distribution: HashMap::new(),
+            cleanup_timer: interval(Duration::from_secs(cleanup_interval_secs)),
+            aggregation_timer: interval(Duration::from_secs(aggregation_window_secs)),
+        }
+    }
+    
+    pub async fn process_packet(
+        &mut self,
+        src_ip: IpAddr,
+        dst_ip: IpAddr,
+        src_port: u16,
+        dst_port: u16,
+        protocol: u8,
+        packet_size: u16,
+        tcp_flags: Option<u8>,
+    ) {
+        let flow_key = FlowKey {
+            src_ip,
+            dst_ip,
+            src_port,
+            dst_port,
+            protocol,
+        };
+        
+        let flow = self.flows.entry(flow_key.clone()).or_insert_with(|| {
+            NetworkFlow::new(src_ip, dst_ip, src_port, dst_port, protocol)
+        });
+        
+        let direction = self.determine_packet_direction(src_ip, dst_ip);
+        flow.update_with_packet(packet_size, direction, tcp_flags);
+        
+        // Check timers
+        // Using select! might be more robust if timers could fire very close together
+        // but for simplicity, checking them sequentially.
+        if self.cleanup_timer.tick().await.is_ok() {
+            self.cleanup_expired_flows();
+        }
+        if self.aggregation_timer.tick().await.is_ok() {
+            self.update_aggregation_stats().await;
+        }
+    }
+    
+    fn cleanup_expired_flows(&mut self) {
+        let now = SystemTime::now();
+        let timeout = self.flow_timeout;
+        
+        self.flows.retain(|_, flow| {
+            if let Ok(age) = now.duration_since(flow.last_seen) {
+                age < timeout
+            } else {
+                // last_seen is in the future, keep it (should not happen)
+                true
+            }
+        });
+        
+        tracing::debug!("Flow cleanup complete. Active flows: {}", self.flows.len());
+    }
+    
+    async fn update_aggregation_stats(&mut self) {
+        self.calculate_top_talkers();
+        self.calculate_protocol_distribution();
+        
+        let summary = self.generate_flow_summary();
+        if let Err(e) = self.send_to_backend(&summary).await {
+            tracing::error!("Failed to send flow summary to backend: {}", e);
+        }
+        tracing::debug!("Aggregation stats updated and sent. Active flows: {}", self.flows.len());
+    }
+    
+    fn calculate_top_talkers(&mut self) {
+        let mut talker_stats: HashMap<IpAddr, (u64, u64, u32, Vec<u8>)> = HashMap::new(); // bytes, packets, flow_count, protocols
+        
+        for flow in self.flows.values() {
+            // Source IP stats
+            let src_entry = talker_stats.entry(flow.src_ip).or_insert((0, 0, 0, Vec::new()));
+            src_entry.0 += flow.bytes_sent;
+            src_entry.1 += flow.packets_sent;
+            src_entry.2 += 1;
+            if !src_entry.3.contains(&flow.protocol) {
+                src_entry.3.push(flow.protocol);
+            }
+            
+            // Destination IP stats (if not the same as source, to avoid double counting for local traffic)
+            // This logic might need refinement based on how "talker" is defined.
+            // The original code counted bytes_received for dst_ip, which is fine.
+            let dst_entry = talker_stats.entry(flow.dst_ip).or_insert((0, 0, 0, Vec::new()));
+            dst_entry.0 += flow.bytes_received;
+            dst_entry.1 += flow.packets_received;
+            // Not incrementing flow_count for dst_entry to avoid double counting flows per IP
+            // but this means flow_count for an IP might be only its outbound flows.
+            // Let's stick to the original logic for now.
+            dst_entry.2 += 1; // Original logic incremented flow count for dst too.
+            if !dst_entry.3.contains(&flow.protocol) {
+                dst_entry.3.push(flow.protocol);
+            }
+        }
+        
+        let mut talkers: Vec<TopTalker> = talker_stats.into_iter().map(|(ip, (bytes, packets, flows_count, protocols))| {
+            TopTalker { ip, bytes_total: bytes, packets_total: packets, flows_count, protocols }
+        }).collect();
+        
+        talkers.sort_by(|a, b| b.bytes_total.cmp(&a.bytes_total));
+        self.top_talkers_by_bytes = talkers.iter().take(10).cloned().collect();
+        
+        talkers.sort_by(|a, b| b.packets_total.cmp(&a.packets_total));
+        self.top_talkers_by_packets = talkers.iter().take(10).cloned().collect();
+    }
+    
+    fn calculate_protocol_distribution(&mut self) {
+        let mut current_protocol_stats: HashMap<u8, (u32, u64, u64)> = HashMap::new(); // flows_count, bytes_total, packets_total
+        let mut grand_total_flows = 0u32;
+        let mut grand_total_bytes = 0u64;
+        
+        for flow in self.flows.values() {
+            let stats = current_protocol_stats.entry(flow.protocol).or_insert((0, 0, 0));
+            stats.0 += 1; // flows_count
+            stats.1 += flow.bytes_sent + flow.bytes_received; // bytes_total
+            stats.2 += flow.packets_sent + flow.packets_received; // packets_total
+            
+            grand_total_flows += 1;
+            grand_total_bytes += flow.bytes_sent + flow.bytes_received;
+        }
+        
+        self.protocol_distribution.clear();
+        for (protocol, (flows, bytes, packets)) in current_protocol_stats {
+            let perc_flows = if grand_total_flows > 0 { (flows as f64 / grand_total_flows as f64) * 100.0 } else { 0.0 };
+            let perc_bytes = if grand_total_bytes > 0 { (bytes as f64 / grand_total_bytes as f64) * 100.0 } else { 0.0 };
+            self.protocol_distribution.insert(protocol, ProtocolStats {
+                protocol,
+                flows_count: flows,
+                bytes_total: bytes,
+                packets_total: packets,
+                percentage_of_total_flows: perc_flows,
+                percentage_of_total_bytes: perc_bytes,
+            });
+        }
+    }
+    
+    fn generate_flow_summary(&self) -> FlowSummary {
+        let active_flows_count = self.flows.len() as u32;
+        // total_flows_in_window would ideally count unique flows seen since last aggregation.
+        // For simplicity, using active_flows_count for now.
+        let total_flows_in_window = active_flows_count; 
+        let bandwidth_stats = self.calculate_bandwidth_stats_for_summary();
+        
+        FlowSummary {
+            timestamp: SystemTime::now(),
+            total_flows_in_window,
+            active_flows_count,
+            top_talkers_bytes: self.top_talkers_by_bytes.clone(),
+            top_talkers_packets: self.top_talkers_by_packets.clone(),
+            protocol_distribution: self.protocol_distribution.values().cloned().collect(),
+            bandwidth_usage: bandwidth_stats,
+        }
+    }
+    
+    fn calculate_bandwidth_stats_for_summary(&self) -> BandwidthStats {
+        let mut total_bytes_per_sec_sum = 0.0;
+        let mut total_packets_per_sec_sum = 0.0;
+        let mut peak_bps_in_window = 0.0;
+        let num_flows = self.flows.len();
+
+        if num_flows == 0 {
+            return BandwidthStats {
+                total_bytes_per_sec: 0.0,
+                total_packets_per_sec: 0.0,
+                peak_bandwidth_in_window: 0.0,
+                average_bandwidth_in_window: 0.0,
+            };
+        }
+        
+        for flow in self.flows.values() {
+            total_bytes_per_sec_sum += flow.bytes_per_second;
+            total_packets_per_sec_sum += flow.packets_per_second;
+            if flow.bytes_per_second > peak_bps_in_window {
+                peak_bps_in_window = flow.bytes_per_second;
+            }
+        }
+        
+        // total_bytes_per_sec and total_packets_per_sec here are sums over active flows' rates
+        // average_bandwidth_in_window is the average of these rates
+        BandwidthStats {
+            total_bytes_per_sec: total_bytes_per_sec_sum,
+            total_packets_per_sec: total_packets_per_sec_sum,
+            peak_bandwidth_in_window: peak_bps_in_window,
+            average_bandwidth_in_window: total_bytes_per_sec_sum / num_flows as f64,
+        }
+    }
+    
+    async fn send_to_backend(&self, summary: &FlowSummary) -> Result<(), redis::RedisError> {
+        // Ensure REDIS_URL is configured, e.g., via environment variable or config file
+        let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/".to_string());
+        let client = redis::Client::open(redis_url)?;
+        let mut con = client.get_async_connection().await?;
+        
+        let serialized = serde_json::to_string(summary).map_err(|e| 
+            redis::RedisError::from(std::io::Error::new(std::io::ErrorKind::Other, e))
+        )?;
+        
+        redis::cmd("PUBLISH")
+            .arg("network_flows") // Consistent with Python subscriber
+            .arg(serialized)
+            .query_async(&mut con)
+            .await?;
+        Ok(())
+    }
+    
+    fn determine_packet_direction(&self, src_ip: IpAddr, dst_ip: IpAddr) -> PacketDirection {
+        // Simple heuristic based on user's provided logic
+        match (src_ip, dst_ip) {
+            (IpAddr::V4(src), IpAddr::V4(dst)) => {
+                if src.is_private() && !dst.is_private() {
+                    PacketDirection::Outbound // Private to Public
+                } else if !src.is_private() && dst.is_private() {
+                    PacketDirection::Inbound  // Public to Private
+                } else if src.is_private() && dst.is_private() {
+                    PacketDirection::Outbound // Both Private (e.g. LAN traffic, considered outbound from src)
+                } else { // Both Public or other cases (e.g. loopback to loopback)
+                    PacketDirection::Outbound // Default for Public to Public or unknown internal
+                }
+            }
+            (IpAddr::V6(src), IpAddr::V6(dst)) => {
+                // Heuristic for IPv6: ULA (Unique Local Addresses fc00::/7) are like private.
+                // Link-local (fe80::/10) is for the local segment.
+                // Global addresses are anything else.
+                let src_is_local_scope = src.is_loopback() ||
+                                         (src.segments()[0] & 0xfe00 == 0xfc00) || // ULA fc00::/7
+                                         (src.segments()[0] & 0xffc0 == 0xfe80);   // Link-local fe80::/10
+                let dst_is_local_scope = dst.is_loopback() ||
+                                         (dst.segments()[0] & 0xfe00 == 0xfc00) || // ULA fc00::/7
+                                         (dst.segments()[0] & 0xffc0 == 0xfe80);   // Link-local fe80::/10
+
+                if src_is_local_scope && !dst_is_local_scope {
+                    PacketDirection::Outbound // Local to Global
+                } else if !src_is_local_scope && dst_is_local_scope {
+                    PacketDirection::Inbound  // Global to Local
+                } else { // Both local scope, or both global scope
+                    PacketDirection::Outbound // Default (e.g. local-to-local is outbound from src, global-to-global is outbound from src)
+                }
+            }
+            _ => PacketDirection::Outbound, // Mixed IPv4/IPv6 or other types, default to Outbound
+        }
+}
