@@ -1,5 +1,5 @@
 // src/network/flow.rs
-use std::collections::HashMap;
+// use std::collections::HashMap; // Unused
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 use serde::{Serialize, Deserialize};
@@ -83,8 +83,7 @@ impl NetworkFlow {
     pub fn update_with_packet(&mut self, packet_size: u16, direction: PacketDirection, tcp_flags_option: Option<u8>) {
         let now = SystemTime::now();
         
-        // Update timing
-        if self.packets_sent > 0 || self.packets_received > 0 { // Only calculate inter-arrival after first packet
+        if self.packets_sent > 0 || self.packets_received > 0 { 
             if let Ok(elapsed) = now.duration_since(self.last_seen) {
                 self.inter_arrival_times.push(elapsed);
             }
@@ -94,7 +93,6 @@ impl NetworkFlow {
             self.duration = duration;
         }
         
-        // Update counters
         match direction {
             PacketDirection::Outbound => {
                 self.packets_sent += 1;
@@ -106,16 +104,14 @@ impl NetworkFlow {
             }
         }
         
-        // Store packet details
         self.packet_sizes.push(packet_size);
         if let Some(flags) = tcp_flags_option {
-            if self.protocol == 6 { // Only store TCP flags for TCP protocol
+            if self.protocol == 6 { 
                 self.tcp_flags.push(flags);
                 self.update_connection_state(flags);
             }
         }
         
-        // Update derived metrics
         self.calculate_derived_metrics();
     }
     
@@ -140,67 +136,55 @@ impl NetworkFlow {
     }
     
     fn update_connection_state(&mut self, tcp_flags: u8) {
-        // Ensure this is only called for TCP flows
         if self.protocol != 6 {
             self.connection_state = ConnectionState::Unknown;
             return;
         }
 
-        // TCP flag constants
         const SYN: u8 = 0x02;
         const ACK: u8 = 0x10;
         const FIN: u8 = 0x01;
         const RST: u8 = 0x04;
         
-        // Simplified state logic based on last seen flags
-        // More robust state tracking would require seeing both sides of communication
-        // or more context from the flow aggregator.
         match self.connection_state {
             ConnectionState::Unknown | ConnectionState::Closed | ConnectionState::Reset => {
-                if (tcp_flags & SYN != 0) && (tcp_flags & ACK == 0) {
+                if tcp_flags & SYN != 0 && tcp_flags & ACK == 0 {
                     self.connection_state = ConnectionState::SynSent;
                 }
             }
             ConnectionState::SynSent => {
-                if (tcp_flags & SYN != 0) && (tcp_flags & ACK != 0) {
+                if tcp_flags & SYN != 0 && tcp_flags & ACK != 0 {
                     self.connection_state = ConnectionState::SynReceived;
-                } else if (tcp_flags & ACK != 0) { // Assuming SYN was from other side
+                } else if tcp_flags & ACK != 0 { 
                      self.connection_state = ConnectionState::Established;
                 }
             }
             ConnectionState::SynReceived => {
-                if (tcp_flags & ACK != 0) && (tcp_flags & SYN == 0) { // ACK to our SYN-ACK
+                if tcp_flags & ACK != 0 && tcp_flags & SYN == 0 { 
                     self.connection_state = ConnectionState::Established;
                 }
             }
             ConnectionState::Established => {
-                if (tcp_flags & FIN != 0) {
+                if tcp_flags & FIN != 0 {
                     self.connection_state = ConnectionState::FinWait;
-                } else if (tcp_flags & RST != 0) {
+                } else if tcp_flags & RST != 0 {
                     self.connection_state = ConnectionState::Reset;
                 }
             }
             ConnectionState::FinWait => {
-                // Could transition to Closed or stay in FinWait depending on further FINs/ACKs
-                if (tcp_flags & ACK != 0) { // Acknowledging FIN
-                    // Potentially move to a state like FIN_WAIT_2 or TIME_WAIT if we had more info
-                    // For simplicity, if we see an RST after FIN, it's a reset.
-                    if (tcp_flags & RST != 0) {
+                if tcp_flags & ACK != 0 { 
+                    if tcp_flags & RST != 0 {
                         self.connection_state = ConnectionState::Reset;
                     }
-                    // If it's just an ACK, we might be waiting for peer's FIN.
-                } else if (tcp_flags & FIN != 0) {
-                     // If we see another FIN, could be simultaneous close.
-                } else if (tcp_flags & RST != 0) {
+                } else if tcp_flags & FIN != 0 {
+                } else if tcp_flags & RST != 0 {
                     self.connection_state = ConnectionState::Reset;
                 }
             }
-            // Reset and Closed are terminal states for this simplified model
-            _ => {} 
+            // Removed unreachable _ => {} as all variants are covered or fall through
         }
 
-        // Override with RST if seen
-        if (tcp_flags & RST != 0) {
+        if tcp_flags & RST != 0 {
             self.connection_state = ConnectionState::Reset;
         }
     }

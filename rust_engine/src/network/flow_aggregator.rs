@@ -3,24 +3,21 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 use tokio::time::{interval, Interval};
-use serde::Serialize; // Added for TopTalker, ProtocolStats, FlowSummary, BandwidthStats
+use serde::Serialize; 
+use tracing; 
 
-// Assuming NetworkFlow and PacketDirection are in a sibling module 'flow'
-use super::flow::{NetworkFlow, PacketDirection, ConnectionState}; // Adjusted path
+use super::flow::{NetworkFlow, PacketDirection}; 
 
 pub struct FlowAggregator {
     flows: HashMap<FlowKey, NetworkFlow>,
     flow_timeout: Duration,
-    // aggregation_window: Duration, // This was in the user's code but not used
     
-    // Top talkers tracking
     top_talkers_by_bytes: Vec<TopTalker>,
     top_talkers_by_packets: Vec<TopTalker>,
     protocol_distribution: HashMap<u8, ProtocolStats>,
     
-    // Cleanup timer
     cleanup_timer: Interval,
-    aggregation_timer: Interval, // Added for periodic aggregation
+    aggregation_timer: Interval, 
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -47,15 +44,15 @@ pub struct ProtocolStats {
     pub flows_count: u32,
     pub bytes_total: u64,
     pub packets_total: u64,
-    pub percentage_of_total_flows: f64, // Renamed for clarity
-    pub percentage_of_total_bytes: f64, // Added for more detail
+    pub percentage_of_total_flows: f64, 
+    pub percentage_of_total_bytes: f64, 
 }
 
 #[derive(Debug, Serialize)]
 pub struct FlowSummary {
     pub timestamp: SystemTime,
-    pub total_flows_in_window: u32, // Number of flows active during this aggregation window
-    pub active_flows_count: u32, // Current number of active flows in the map
+    pub total_flows_in_window: u32, 
+    pub active_flows_count: u32, 
     pub top_talkers_bytes: Vec<TopTalker>,
     pub top_talkers_packets: Vec<TopTalker>,
     pub protocol_distribution: Vec<ProtocolStats>,
@@ -66,8 +63,8 @@ pub struct FlowSummary {
 pub struct BandwidthStats {
     pub total_bytes_per_sec: f64,
     pub total_packets_per_sec: f64,
-    pub peak_bandwidth_in_window: f64, // Peak observed during this window
-    pub average_bandwidth_in_window: f64, // Average during this window
+    pub peak_bandwidth_in_window: f64, 
+    pub average_bandwidth_in_window: f64, 
 }
 
 impl FlowAggregator {
@@ -75,7 +72,6 @@ impl FlowAggregator {
         Self {
             flows: HashMap::new(),
             flow_timeout: Duration::from_secs(flow_timeout_secs),
-            // aggregation_window: Duration::from_secs(aggregation_window_secs), // Not directly used for tick
             top_talkers_by_bytes: Vec::new(),
             top_talkers_by_packets: Vec::new(),
             protocol_distribution: HashMap::new(),
@@ -102,22 +98,20 @@ impl FlowAggregator {
             protocol,
         };
         
+        // Determine direction before mutable borrow of self.flows
+        let direction = self.determine_packet_direction(src_ip, dst_ip);
+        
         let flow = self.flows.entry(flow_key.clone()).or_insert_with(|| {
             NetworkFlow::new(src_ip, dst_ip, src_port, dst_port, protocol)
         });
         
-        let direction = self.determine_packet_direction(src_ip, dst_ip);
         flow.update_with_packet(packet_size, direction, tcp_flags);
         
-        // Check timers
-        // Using select! might be more robust if timers could fire very close together
-        // but for simplicity, checking them sequentially.
-        if self.cleanup_timer.tick().await.is_ok() {
-            self.cleanup_expired_flows();
-        }
-        if self.aggregation_timer.tick().await.is_ok() {
-            self.update_aggregation_stats().await;
-        }
+        self.cleanup_timer.tick().await; 
+        self.cleanup_expired_flows();
+        
+        self.aggregation_timer.tick().await; 
+        self.update_aggregation_stats().await;
     }
     
     fn cleanup_expired_flows(&mut self) {
@@ -128,7 +122,6 @@ impl FlowAggregator {
             if let Ok(age) = now.duration_since(flow.last_seen) {
                 age < timeout
             } else {
-                // last_seen is in the future, keep it (should not happen)
                 true
             }
         });
@@ -148,10 +141,9 @@ impl FlowAggregator {
     }
     
     fn calculate_top_talkers(&mut self) {
-        let mut talker_stats: HashMap<IpAddr, (u64, u64, u32, Vec<u8>)> = HashMap::new(); // bytes, packets, flow_count, protocols
+        let mut talker_stats: HashMap<IpAddr, (u64, u64, u32, Vec<u8>)> = HashMap::new(); 
         
         for flow in self.flows.values() {
-            // Source IP stats
             let src_entry = talker_stats.entry(flow.src_ip).or_insert((0, 0, 0, Vec::new()));
             src_entry.0 += flow.bytes_sent;
             src_entry.1 += flow.packets_sent;
@@ -160,16 +152,10 @@ impl FlowAggregator {
                 src_entry.3.push(flow.protocol);
             }
             
-            // Destination IP stats (if not the same as source, to avoid double counting for local traffic)
-            // This logic might need refinement based on how "talker" is defined.
-            // The original code counted bytes_received for dst_ip, which is fine.
             let dst_entry = talker_stats.entry(flow.dst_ip).or_insert((0, 0, 0, Vec::new()));
             dst_entry.0 += flow.bytes_received;
             dst_entry.1 += flow.packets_received;
-            // Not incrementing flow_count for dst_entry to avoid double counting flows per IP
-            // but this means flow_count for an IP might be only its outbound flows.
-            // Let's stick to the original logic for now.
-            dst_entry.2 += 1; // Original logic incremented flow count for dst too.
+            dst_entry.2 += 1; 
             if !dst_entry.3.contains(&flow.protocol) {
                 dst_entry.3.push(flow.protocol);
             }
@@ -187,15 +173,15 @@ impl FlowAggregator {
     }
     
     fn calculate_protocol_distribution(&mut self) {
-        let mut current_protocol_stats: HashMap<u8, (u32, u64, u64)> = HashMap::new(); // flows_count, bytes_total, packets_total
+        let mut current_protocol_stats: HashMap<u8, (u32, u64, u64)> = HashMap::new(); 
         let mut grand_total_flows = 0u32;
         let mut grand_total_bytes = 0u64;
         
         for flow in self.flows.values() {
             let stats = current_protocol_stats.entry(flow.protocol).or_insert((0, 0, 0));
-            stats.0 += 1; // flows_count
-            stats.1 += flow.bytes_sent + flow.bytes_received; // bytes_total
-            stats.2 += flow.packets_sent + flow.packets_received; // packets_total
+            stats.0 += 1; 
+            stats.1 += flow.bytes_sent + flow.bytes_received; 
+            stats.2 += flow.packets_sent + flow.packets_received; 
             
             grand_total_flows += 1;
             grand_total_bytes += flow.bytes_sent + flow.bytes_received;
@@ -218,8 +204,6 @@ impl FlowAggregator {
     
     fn generate_flow_summary(&self) -> FlowSummary {
         let active_flows_count = self.flows.len() as u32;
-        // total_flows_in_window would ideally count unique flows seen since last aggregation.
-        // For simplicity, using active_flows_count for now.
         let total_flows_in_window = active_flows_count; 
         let bandwidth_stats = self.calculate_bandwidth_stats_for_summary();
         
@@ -257,8 +241,6 @@ impl FlowAggregator {
             }
         }
         
-        // total_bytes_per_sec and total_packets_per_sec here are sums over active flows' rates
-        // average_bandwidth_in_window is the average of these rates
         BandwidthStats {
             total_bytes_per_sec: total_bytes_per_sec_sum,
             total_packets_per_sec: total_packets_per_sec_sum,
@@ -268,56 +250,52 @@ impl FlowAggregator {
     }
     
     async fn send_to_backend(&self, summary: &FlowSummary) -> Result<(), redis::RedisError> {
-        // Ensure REDIS_URL is configured, e.g., via environment variable or config file
         let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/".to_string());
         let client = redis::Client::open(redis_url)?;
-        let mut con = client.get_async_connection().await?;
+        let mut con = client.get_multiplexed_async_connection().await?; 
         
         let serialized = serde_json::to_string(summary).map_err(|e| 
             redis::RedisError::from(std::io::Error::new(std::io::ErrorKind::Other, e))
         )?;
         
         redis::cmd("PUBLISH")
-            .arg("network_flows") // Consistent with Python subscriber
+            .arg("network_flows")
             .arg(serialized)
-            .query_async(&mut con)
+            .query_async::<_, ()>(&mut con) 
             .await?;
         Ok(())
     }
     
     fn determine_packet_direction(&self, src_ip: IpAddr, dst_ip: IpAddr) -> PacketDirection {
-        // Simple heuristic based on user's provided logic
         match (src_ip, dst_ip) {
             (IpAddr::V4(src), IpAddr::V4(dst)) => {
                 if src.is_private() && !dst.is_private() {
-                    PacketDirection::Outbound // Private to Public
+                    PacketDirection::Outbound
                 } else if !src.is_private() && dst.is_private() {
-                    PacketDirection::Inbound  // Public to Private
+                    PacketDirection::Inbound
                 } else if src.is_private() && dst.is_private() {
-                    PacketDirection::Outbound // Both Private (e.g. LAN traffic, considered outbound from src)
-                } else { // Both Public or other cases (e.g. loopback to loopback)
-                    PacketDirection::Outbound // Default for Public to Public or unknown internal
+                    PacketDirection::Outbound
+                } else { 
+                    PacketDirection::Outbound 
                 }
             }
             (IpAddr::V6(src), IpAddr::V6(dst)) => {
-                // Heuristic for IPv6: ULA (Unique Local Addresses fc00::/7) are like private.
-                // Link-local (fe80::/10) is for the local segment.
-                // Global addresses are anything else.
                 let src_is_local_scope = src.is_loopback() ||
-                                         (src.segments()[0] & 0xfe00 == 0xfc00) || // ULA fc00::/7
-                                         (src.segments()[0] & 0xffc0 == 0xfe80);   // Link-local fe80::/10
+                                         (src.segments()[0] & 0xfe00 == 0xfc00) || 
+                                         (src.segments()[0] & 0xffc0 == 0xfe80);  
                 let dst_is_local_scope = dst.is_loopback() ||
-                                         (dst.segments()[0] & 0xfe00 == 0xfc00) || // ULA fc00::/7
-                                         (dst.segments()[0] & 0xffc0 == 0xfe80);   // Link-local fe80::/10
+                                         (dst.segments()[0] & 0xfe00 == 0xfc00) || 
+                                         (dst.segments()[0] & 0xffc0 == 0xfe80);  
 
                 if src_is_local_scope && !dst_is_local_scope {
-                    PacketDirection::Outbound // Local to Global
+                    PacketDirection::Outbound 
                 } else if !src_is_local_scope && dst_is_local_scope {
-                    PacketDirection::Inbound  // Global to Local
-                } else { // Both local scope, or both global scope
-                    PacketDirection::Outbound // Default (e.g. local-to-local is outbound from src, global-to-global is outbound from src)
+                    PacketDirection::Inbound  
+                } else { 
+                    PacketDirection::Outbound 
                 }
             }
-            _ => PacketDirection::Outbound, // Mixed IPv4/IPv6 or other types, default to Outbound
+            _ => PacketDirection::Outbound,
         }
+    }
 }
