@@ -1,9 +1,9 @@
 # src/api/security_endpoints.py
 from fastapi import APIRouter, HTTPException, Query, Depends, Path, Body
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 from ..database import get_db # Adjust import path as per your project structure
 from ..models import SecurityAlert as DBSecurityAlert # SQLAlchemy model
 
@@ -19,7 +19,7 @@ class AlertAcknowledgeRequest(BaseModel):
 # These would typically reside in a 'services' or 'crud' layer for alerts.
 
 async def db_get_alerts(
-    db: AsyncSession,
+    db: Session,
     severity: Optional[str] = None,
     acknowledged: Optional[bool] = None,
     alert_type: Optional[str] = None,
@@ -55,7 +55,7 @@ async def db_get_alerts(
     return filtered_alerts[:limit]
 
 
-async def db_get_alert_by_id(db: AsyncSession, alert_id: int) -> Optional[Dict[str, Any]]:
+async def db_get_alert_by_id(db: Session, alert_id: int) -> Optional[Dict[str, Any]]:
     # Placeholder: Fetch a single alert by ID
     print(f"DB Placeholder: Fetching alert with ID {alert_id}")
     # result = await db.execute(select(DBSecurityAlert).filter(DBSecurityAlert.id == alert_id))
@@ -67,7 +67,7 @@ async def db_get_alert_by_id(db: AsyncSession, alert_id: int) -> Optional[Dict[s
             return alert
     return None
 
-async def db_acknowledge_alert(db: AsyncSession, alert_id: int, acknowledged_by: str) -> Optional[Dict[str, Any]]:
+async def db_acknowledge_alert(db: Session, alert_id: int, acknowledged_by: str) -> Optional[Dict[str, Any]]:
     # Placeholder: Update alert to acknowledged
     print(f"DB Placeholder: Acknowledging alert ID {alert_id} by {acknowledged_by}")
     # alert = await db_get_alert_by_id(db, alert_id) # Fetch first
@@ -89,7 +89,7 @@ async def db_acknowledge_alert(db: AsyncSession, alert_id: int, acknowledged_by:
     return None
 
 
-async def db_delete_alert(db: AsyncSession, alert_id: int) -> bool:
+async def db_delete_alert(db: Session, alert_id: int) -> bool:
     # Placeholder: Delete an alert
     print(f"DB Placeholder: Deleting alert ID {alert_id}")
     # alert = await db_get_alert_by_id(db, alert_id) # Fetch first
@@ -112,7 +112,7 @@ async def get_security_alerts(
     sort_order: str = Query("desc", enum=["asc", "desc"]),
     limit: int = Query(100, ge=1, le=1000),
     offset: int = Query(0, ge=0),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """
     Retrieve a list of security alerts with filtering, sorting, and pagination.
@@ -130,7 +130,7 @@ async def get_security_alerts(
 async def acknowledge_security_alert(
     alert_id: int = Path(..., ge=1, description="The ID of the alert to acknowledge"),
     request_body: AlertAcknowledgeRequest = Body(...),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """
     Acknowledge a specific security alert.
@@ -150,7 +150,7 @@ async def acknowledge_security_alert(
 @router.delete("/alerts/{alert_id}", status_code=204) # 204 No Content for successful deletion
 async def delete_security_alert(
     alert_id: int = Path(..., ge=1, description="The ID of the alert to delete"),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """
     Delete/Dismiss a specific security alert.
@@ -170,7 +170,7 @@ async def delete_security_alert(
 @router.get("/alerts/{alert_id}", response_model=Dict[str, Any])
 async def get_single_alert_details(
     alert_id: int = Path(..., ge=1, description="The ID of the alert"),
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     try:
         alert = await db_get_alert_by_id(db, alert_id)

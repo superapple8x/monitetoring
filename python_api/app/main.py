@@ -3,15 +3,19 @@ import json
 import logging
 import os
 from typing import List, Dict, Optional, AsyncGenerator
+from datetime import datetime, timedelta
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, sessionmaker
-from .database import SessionLocal, get_db # engine and Base are not directly needed in main.py anymore
+from .database import SessionLocal, get_db
 from .models import Device, NetworkInterfaceMetric
-import datetime
 
+# Import Phase 3 components
+from .redis.flow_processor import FlowProcessor
+from .api.monitoring_endpoints import router as monitoring_router
+from .api.security_endpoints import router as security_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,8 +25,7 @@ logger = logging.getLogger(__name__)
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 NETWORK_METRICS_CHANNEL = "network_metrics_channel"
 DEVICE_DISCOVERY_CHANNEL = "device_discovery_channel"
-
-
+NETWORK_FLOWS_CHANNEL = "network_flows"
 
 # --- Pydantic Models for Redis Data ---
 class PublishedFlowKey(BaseModel):
@@ -57,8 +60,29 @@ class PublishedDiscoveredDevice(BaseModel):
     last_seen: int # Unix timestamp from Rust
     timestamp: int # Publication timestamp from Rust
 
-app = FastAPI(title="Network Monitoring API")
+# Initialize FastAPI app
+app = FastAPI(title="Network Monitoring API - Phase 3", version="3.0.0")
 
+# --- CORS Middleware Configuration ---
+from fastapi.middleware.cors import CORSMiddleware
+
+origins = [
+    "http://localhost:3000",  # React development server
+    "http://127.0.0.1:3000",
+    # Add production origins as needed
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Include Phase 3 API Routers ---
+app.include_router(monitoring_router)
+app.include_router(security_router)
 
 # --- Connection Manager for WebSockets ---
 class ConnectionManager:
@@ -79,45 +103,22 @@ class ConnectionManager:
         await websocket.send_text(message)
 
     async def broadcast(self, message: str):
-        # logger.debug(f"Broadcasting message: {message} to {len(self.active_connections)} clients")
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
             except Exception as e:
                 logger.error(f"Error sending message to {connection.client}: {e}")
-                # Optionally remove broken connections
-                # self.disconnect(connection) # Be careful with modifying list while iterating
 
     async def broadcast_json(self, data: dict):
-        # logger.debug(f"Broadcasting JSON: {data} to {len(self.active_connections)} clients")
         for connection in self.active_connections:
             try:
                 await connection.send_json(data)
             except Exception as e:
                 logger.error(f"Error sending JSON to {connection.client}: {e}")
 
-
 manager = ConnectionManager()
 
-# --- CORS Middleware Configuration ---
-from fastapi.middleware.cors import CORSMiddleware
-
-origins = [
-    "http://localhost:3000",  # Origin for your React development server
-    "http://127.0.0.1:3000", # Also common for React dev server
-    # Add any other origins your frontend might be served from in production
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,  # Important for WebSockets if they involve credentials/cookies
-    allow_methods=["*"],     # Allows all methods (GET, POST, etc.)
-    allow_headers=["*"],     # Allows all headers
-)
-
-# --- Database Dependency ---
-
+# --- Redis Subscribers ---
 async def metrics_subscriber(db_session_factory: sessionmaker, manager: ConnectionManager):
     logger.info(f"Connecting to Redis for metrics: {REDIS_URL}")
     try:
@@ -140,7 +141,7 @@ async def metrics_subscriber(db_session_factory: sessionmaker, manager: Connecti
                         db: Session = db_session_factory()
                         try:
                             db_metric = NetworkInterfaceMetric(
-                                timestamp=datetime.datetime.fromtimestamp(metrics_data.timestamp, tz=datetime.timezone.utc),
+                                timestamp=datetime.fromtimestamp(metrics_data.timestamp, tz=datetime.timezone.utc),
                                 interface_name=metrics_data.interface_name,
                                 bytes_received=metrics_data.bytes_in,
                                 bytes_sent=metrics_data.bytes_out,
@@ -152,13 +153,10 @@ async def metrics_subscriber(db_session_factory: sessionmaker, manager: Connecti
                             logger.debug(f"Stored interface metric for {metrics_data.interface_name}")
 
                             # Broadcast to WebSocket clients
-                            # Convert bytes/sec from Rust to bits/sec for frontend
-                            # Rust sends aggregate bytes over the interval, assume 1-second interval for bps
-                            # If Rust sends total bytes, this logic needs adjustment based on how Rust calculates and sends bytes_in/out
                             bandwidth_payload = {
-                                "timestamp": metrics_data.timestamp * 1000, # s to ms
-                                "upstreamBps": metrics_data.bytes_out * 8,    # Assuming bytes_out is per second
-                                "downstreamBps": metrics_data.bytes_in * 8   # Assuming bytes_in is per second
+                                "timestamp": metrics_data.timestamp * 1000,
+                                "upstreamBps": metrics_data.bytes_out * 8,
+                                "downstreamBps": metrics_data.bytes_in * 8
                             }
                             await manager.broadcast_json({
                                 "type": "BANDWIDTH_UPDATE",
@@ -173,7 +171,7 @@ async def metrics_subscriber(db_session_factory: sessionmaker, manager: Connecti
                     except Exception as e:
                         logger.error(f"Error processing metrics JSON: {e} - Data: {data_str}")
                 await asyncio.sleep(0.01)
-            except (aioredis.exceptions.ConnectionError, aioredis.exceptions.TimeoutError) as e:
+            except (aioredis.ConnectionError, aioredis.TimeoutError) as e:
                 logger.error(f"Redis connection error in metrics subscriber: {e}. Reconnecting...")
                 await asyncio.sleep(5)
                 try:
@@ -189,7 +187,6 @@ async def metrics_subscriber(db_session_factory: sessionmaker, manager: Connecti
                 await asyncio.sleep(5)
     except Exception as e:
         logger.error(f"Could not connect to Redis for metrics subscription: {e}")
-
 
 async def device_subscriber(db_session_factory: sessionmaker, manager: ConnectionManager):
     logger.info(f"Connecting to Redis for devices: {REDIS_URL}")
@@ -211,10 +208,9 @@ async def device_subscriber(db_session_factory: sessionmaker, manager: Connectio
                         db: Session = db_session_factory()
                         try:
                             db_device = db.query(Device).filter(Device.mac_address == device_data.mac_addr).first()
-                            device_last_seen_dt = datetime.datetime.fromtimestamp(device_data.last_seen, tz=datetime.timezone.utc)
+                            device_last_seen_dt = datetime.fromtimestamp(device_data.last_seen, tz=datetime.timezone.utc)
                             if db_device:
                                 db_device.last_seen_timestamp = device_last_seen_dt
-                                # Potentially update IP if it changed for the same MAC
                                 if db_device.ip_address != device_data.ip_addr:
                                     db_device.ip_address = device_data.ip_addr
                                     logger.info(f"Device MAC {device_data.mac_addr} IP updated to {device_data.ip_addr}")
@@ -222,26 +218,24 @@ async def device_subscriber(db_session_factory: sessionmaker, manager: Connectio
                                 db_device = Device(
                                     ip_address=device_data.ip_addr,
                                     mac_address=device_data.mac_addr,
-                                    first_seen_timestamp=device_last_seen_dt, # Use device's last_seen as first_seen for new entries
+                                    first_seen_timestamp=device_last_seen_dt,
                                     last_seen_timestamp=device_last_seen_dt
                                 )
                                 db.add(db_device)
                             db.commit()
                             logger.debug(f"Upserted device: MAC {device_data.mac_addr}")
                             
-                            # Ensure db_device is the committed/refreshed instance if needed,
-                            # but here attributes are set directly before commit.
                             device_payload_item = {
                                 "id": db_device.mac_address,
                                 "ipAddress": db_device.ip_address,
                                 "macAddress": db_device.mac_address,
-                                "name": getattr(db_device, 'name', db_device.ip_address), # Fallback name to IP
+                                "name": getattr(db_device, 'name', db_device.ip_address),
                                 "status": "online",
                                 "firstSeen": db_device.first_seen_timestamp.isoformat() if db_device.first_seen_timestamp else None,
                                 "lastSeen": db_device.last_seen_timestamp.isoformat() if db_device.last_seen_timestamp else None,
                             }
                             await manager.broadcast_json({
-                                "type": "DEVICE_UPDATE", # Frontend expects an array for DEVICE_UPDATE
+                                "type": "DEVICE_UPDATE",
                                 "payload": [device_payload_item]
                             })
                         except Exception as db_exc:
@@ -253,7 +247,7 @@ async def device_subscriber(db_session_factory: sessionmaker, manager: Connectio
                     except Exception as e:
                         logger.error(f"Error processing device JSON: {e} - Data: {data_str}")
                 await asyncio.sleep(0.01)
-            except (aioredis.exceptions.ConnectionError, aioredis.exceptions.TimeoutError) as e:
+            except (aioredis.ConnectionError, aioredis.TimeoutError) as e:
                 logger.error(f"Redis connection error in device subscriber: {e}. Reconnecting...")
                 await asyncio.sleep(5)
                 try:
@@ -270,21 +264,63 @@ async def device_subscriber(db_session_factory: sessionmaker, manager: Connectio
     except Exception as e:
         logger.error(f"Could not connect to Redis for device subscription: {e}")
 
+# --- Phase 3: Global FlowProcessor instance ---
+flow_processor = None
+flow_processor_task = None
+
+# --- Application Lifecycle Events ---
 @app.on_event("startup")
 async def startup_event():
+    global flow_processor, flow_processor_task
+    logger.info("Starting Phase 3 Network Monitoring API...")
+    
+    # Start traditional Redis subscribers
     logger.info("Starting Redis subscriber tasks...")
-    # Pass the SessionLocal factory AND the manager instance to the subscribers
     asyncio.create_task(metrics_subscriber(SessionLocal, manager))
     asyncio.create_task(device_subscriber(SessionLocal, manager))
+    
+    # Start Phase 3 FlowProcessor
+    logger.info("Starting Phase 3 FlowProcessor...")
+    flow_processor = FlowProcessor(REDIS_URL)
+    flow_processor_task = asyncio.create_task(flow_processor.start_processing())
+    
+    logger.info("Phase 3 Network Monitoring API startup complete!")
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    global flow_processor, flow_processor_task
+    logger.info("Shutting down Phase 3 Network Monitoring API...")
+    
+    if flow_processor:
+        logger.info("Stopping FlowProcessor...")
+        await flow_processor.stop_processing()
+    if flow_processor_task:
+        flow_processor_task.cancel()
+        try:
+            await flow_processor_task
+        except asyncio.CancelledError:
+            pass
+    
+    logger.info("Phase 3 Network Monitoring API shutdown complete!")
+
+# --- Root Endpoint ---
 @app.get("/")
 async def root():
-    return {"message": "Welcome to the Network Monitoring API"}
-
+    return {
+        "message": "Welcome to the Network Monitoring API - Phase 3",
+        "version": "3.0.0",
+        "features": [
+            "Enhanced Flow Monitoring",
+            "Security Detection (Port Scans, DDoS)",
+            "ML Integration Framework",
+            "Historical Data Analysis",
+            "Real-time Alerts"
+        ]
+    }
 
 # --- WebSocket Endpoint ---
 @app.websocket("/ws/network-data")
-async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)): # Added get_db dependency
+async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
     await manager.connect(websocket)
     try:
         # Send initial list of all devices to the newly connected client
@@ -295,8 +331,8 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
                     "id": dev.mac_address,
                     "ipAddress": dev.ip_address,
                     "macAddress": dev.mac_address,
-                    "name": getattr(dev, 'name', dev.ip_address), # Fallback name to IP
-                    "status": "online", # Assuming "online" if in DB
+                    "name": getattr(dev, 'name', dev.ip_address),
+                    "status": "online",
                     "firstSeen": dev.first_seen_timestamp.isoformat() if dev.first_seen_timestamp else None,
                     "lastSeen": dev.last_seen_timestamp.isoformat() if dev.last_seen_timestamp else None,
                 } for dev in all_db_devices
@@ -305,45 +341,37 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
                 await websocket.send_json({"type": "ALL_DEVICES", "payload": initial_devices_payload})
                 logger.info(f"Sent initial {len(initial_devices_payload)} devices to {websocket.client.host}:{websocket.client.port}")
             else:
-                # Send an empty ALL_DEVICES if none exist, so frontend knows initial load is done
                 await websocket.send_json({"type": "ALL_DEVICES", "payload": []})
                 logger.info(f"No initial devices to send to {websocket.client.host}:{websocket.client.port}")
 
         except Exception as e_init_devices:
             logger.error(f"Error sending initial device list to {websocket.client.host}: {e_init_devices}")
 
-        # Keep the connection alive and optionally handle client messages
+        # Keep the connection alive
         while True:
-            # This loop primarily keeps the connection open for server-sent events.
-            # If you need to receive messages from the client, uncomment the receive_text/json lines.
-            # Example: data = await websocket.receive_text()
-            # logger.info(f"Received from {websocket.client}: {data}")
-            
-            # Optional: Send a PING to keep connection alive / check status
             try:
-                await websocket.send_text(json.dumps({"type": "PING", "timestamp": datetime.datetime.utcnow().isoformat()}))
-            except Exception: # Connection might have dropped
-                break # Exit loop to trigger disconnect logic
-            await asyncio.sleep(30) # Send a ping every 30 seconds
+                await websocket.send_text(json.dumps({"type": "PING", "timestamp": datetime.utcnow().isoformat()}))
+            except Exception:
+                break
+            await asyncio.sleep(30)
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket cleanly disconnected by client: {websocket.client.host}:{websocket.client.port}")
     except Exception as e:
         logger.error(f"Error in websocket_endpoint for {websocket.client}: {e}")
-    finally: # Ensure disconnect is called
+    finally:
         manager.disconnect(websocket)
 
-
-# --- API Endpoints (Step 4.4) ---
-@app.get("/api/v1/devices", response_model=List[PublishedDiscoveredDevice]) # Re-using for now
+# --- Legacy API Endpoints (Compatibility) ---
+@app.get("/api/v1/devices", response_model=List[PublishedDiscoveredDevice])
 async def get_devices(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
     devices = db.query(Device).offset(skip).limit(limit).all()
     return [
         PublishedDiscoveredDevice(
             ip_addr=device.ip_address,
             mac_addr=device.mac_address,
-            last_seen=int(device.last_seen_timestamp.timestamp()), # Convert datetime to unix timestamp
-            timestamp=int(device.last_seen_timestamp.timestamp()) # Using last_seen as publication time for simplicity
+            last_seen=int(device.last_seen_timestamp.timestamp()),
+            timestamp=int(device.last_seen_timestamp.timestamp())
         ) for device in devices
     ]
 
@@ -361,15 +389,15 @@ async def get_latest_interface_metrics(interface_name: str, db: Session = Depend
             packets_out=metric.packets_sent,
             bytes_in=metric.bytes_received,
             bytes_out=metric.bytes_sent,
-            active_flows=[] # Simplified for this endpoint, full flow data not stored directly here
+            active_flows=[]
         )
     return None
 
 @app.get("/api/v1/metrics/interfaces/{interface_name}/historical", response_model=List[PublishedInterfaceMetrics])
 async def get_historical_interface_metrics(
     interface_name: str, 
-    start_time: Optional[datetime.datetime] = None, 
-    end_time: Optional[datetime.datetime] = None, 
+    start_time: Optional[datetime] = None, 
+    end_time: Optional[datetime] = None, 
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
@@ -390,10 +418,22 @@ async def get_historical_interface_metrics(
             packets_out=m.packets_sent,
             bytes_in=m.bytes_received,
             bytes_out=m.bytes_sent,
-            active_flows=[] # Simplified
+            active_flows=[]
         ) for m in metrics
     ]
 
+# --- Health Check Endpoint ---
+@app.get("/health")
+async def health_check():
+    return {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": {
+            "database": "connected",
+            "redis": "connected",
+            "flow_processor": "running" if flow_processor and flow_processor.is_processing else "stopped"
+        }
+    }
 
 if __name__ == "__main__":
     import uvicorn

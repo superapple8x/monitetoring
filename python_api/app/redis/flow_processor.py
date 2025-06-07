@@ -76,7 +76,7 @@ class FlowProcessor:
                         print(f"FlowProcessor Error: Could not decode JSON from message: {e}")
                     except Exception as e:
                         print(f"FlowProcessor Error: Unexpected error processing message: {e}")
-        except redis.exceptions.ConnectionError as e:
+        except redis.ConnectionError as e:
             print(f"FlowProcessor Error: Redis connection lost: {e}. Attempting to reconnect...")
             await asyncio.sleep(5) # Wait before trying to resubscribe
             # Recursive call or a loop in start_processing might be needed for robust reconnection

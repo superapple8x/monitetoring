@@ -4,10 +4,9 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import asyncio # For any async operations within endpoints
 
-# Assuming SessionLocal is defined in your database setup
-# and a dependency function get_db is available
-from sqlalchemy.ext.asyncio import AsyncSession
-from ..database import get_db # Adjust import path as per your project structure
+# Import database dependencies
+from sqlalchemy.orm import Session
+from ..database import get_db
 
 # Import models for type hinting and potential direct queries if simple
 from ..models import (
@@ -19,7 +18,7 @@ from ..models import (
 from ..security.port_scan_detector import PortScanDetector
 from ..security.ddos_detector import DDoSDetector
 # Assuming ml_manager is initialized and accessible, e.g., via a dependency or global
-from ..security.ml_integration_manager import setup_ml_models 
+from ..security.ml_integration_manager import setup_ml_integration_manager 
 
 router = APIRouter(prefix="/api/monitoring", tags=["Monitoring & Analysis"])
 
@@ -32,7 +31,7 @@ router = APIRouter(prefix="/api/monitoring", tags=["Monitoring & Analysis"])
 # These would typically reside in a 'services' or 'crud' layer.
 
 async def db_get_bandwidth_history(
-    db: AsyncSession, start_time: datetime, end_time: datetime
+    db: Session, start_time: datetime, end_time: datetime
 ) -> List[Dict[str, Any]]:
     # Placeholder: Query BandwidthHistory table
     # Example:
@@ -44,7 +43,7 @@ async def db_get_bandwidth_history(
     return [{"timestamp": datetime.utcnow().isoformat(), "total_bytes_per_sec": 1000, "active_flows": 10}] 
 
 async def db_get_protocol_distribution_history(
-    db: AsyncSession, start_time: datetime, end_time: datetime
+    db: Session, start_time: datetime, end_time: datetime
 ) -> List[Dict[str, Any]]:
     # Placeholder: Query ProtocolDistributionHistory table
     # This should return a list of records, where each record might represent a snapshot
@@ -62,7 +61,7 @@ async def db_get_protocol_distribution_history(
     }]
 
 async def db_get_top_talkers_history(
-    db: AsyncSession, start_time: datetime, end_time: datetime
+    db: Session, start_time: datetime, end_time: datetime
 ) -> List[Dict[str, Any]]:
     # Placeholder: Query TopTalkersHistory table
     # Similar to protocol distribution, this might be snapshots of top talkers.
@@ -75,7 +74,7 @@ async def db_get_top_talkers_history(
         ]
     }]
 
-async def db_get_active_flows_summary(db: AsyncSession) -> List[Dict[str, Any]]:
+async def db_get_active_flows_summary(db: Session) -> List[Dict[str, Any]]:
     # Placeholder: Query NetworkFlow for "active" flows or use cached data from Redis if available
     # This is a complex query; "active" needs definition (e.g., last seen recently)
     print("DB Placeholder: Fetching active flows summary")
@@ -84,7 +83,7 @@ async def db_get_active_flows_summary(db: AsyncSession) -> List[Dict[str, Any]]:
         {"src_ip": "192.168.1.102", "dst_ip": "1.1.1.1", "protocol": 6, "bytes_per_second": 2000.0}
     ]
 
-async def db_get_recent_alerts_summary(db: AsyncSession, hours: int = 1) -> List[Dict[str, Any]]:
+async def db_get_recent_alerts_summary(db: Session, hours: int = 1) -> List[Dict[str, Any]]:
     # Placeholder: Query SecurityAlert table for recent alerts
     start_time = datetime.utcnow() - timedelta(hours=hours)
     print(f"DB Placeholder: Fetching alerts since {start_time}")
@@ -99,7 +98,7 @@ async def db_get_recent_alerts_summary(db: AsyncSession, hours: int = 1) -> List
 async def get_historical_data(
     range_str: str = Query("1h", alias="range", regex="^(1h|6h|24h|7d)$"),
     # data_type: Optional[str] = Query(None), # Not used in current plan, can be added for specific data types
-    db: AsyncSession = Depends(get_db)
+    db: Session = Depends(get_db)
 ):
     """
     Get historical monitoring data for bandwidth, protocol distribution, and top talkers.
@@ -137,7 +136,7 @@ async def get_historical_data(
 
 
 @router.get("/network-summary", response_model=Dict[str, Any])
-async def get_network_summary(db: AsyncSession = Depends(get_db)):
+async def get_network_summary(db: Session = Depends(get_db)):
     """
     Get current network summary statistics including active flows, device count,
     total bandwidth, recent alerts, and top protocols.
