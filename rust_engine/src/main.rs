@@ -197,9 +197,14 @@ async fn handle_ethernet_packet(
                     _ => (0,0) 
                 };
 
-                if src_port != 0 && dst_port != 0 {
+                // Process all packets with identified protocols, not just those with non-zero ports
+                if protocol_type == IpNextHeaderProtocols::Tcp || protocol_type == IpNextHeaderProtocols::Udp {
                     let mut agg = flow_aggregator_arc.lock().await;
                     agg.process_packet(src_ip, dst_ip, src_port, dst_port, protocol_u8, packet_length, tcp_flags).await;
+                    log::debug!(
+                        "[{}] Processed packet: {} -> {} | Proto: {} | Ports: {}:{} | Len: {} bytes",
+                        interface_name, src_ip, dst_ip, protocol_u8, src_port, dst_port, packet_length
+                    );
                 }
                  log::trace!(
                     "[{}] IPv4 | {} -> {} | Proto: {:?} | Len: {} bytes",
@@ -290,9 +295,14 @@ async fn handle_ethernet_packet(
                      _ => (0,0)
                 };
 
-                if src_port != 0 && dst_port != 0 {
+                // Process all packets with identified protocols, not just those with non-zero ports
+                if protocol_type == IpNextHeaderProtocols::Tcp || protocol_type == IpNextHeaderProtocols::Udp {
                     let mut agg = flow_aggregator_arc.lock().await;
                     agg.process_packet(src_ip, dst_ip, src_port, dst_port, protocol_u8, packet_length, tcp_flags).await;
+                    log::debug!(
+                        "[{}] Processed IPv6 packet: {} -> {} | Proto: {} | Ports: {}:{} | Len: {} bytes",
+                        interface_name, src_ip, dst_ip, protocol_u8, src_port, dst_port, packet_length
+                    );
                 }
                 log::trace!(
                     "[{}] IPv6 | {} -> {} | Proto: {:?} | Len: {} bytes",
