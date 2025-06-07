@@ -135,6 +135,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         FLOW_AGGREGATOR_CLEANUP_INTERVAL_SECS,
     )));
 
+    // Create separate timer tasks
+    let cleanup_aggregator = flow_aggregator_arc.clone();
+    let cleanup_task = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(FLOW_AGGREGATOR_CLEANUP_INTERVAL_SECS)).await;
+            let mut agg = cleanup_aggregator.lock().await;
+            agg.cleanup_expired_flows();
+            log::debug!("Cleanup tick completed");
+        }
+    });
+
+    let aggregation_aggregator = flow_aggregator_arc.clone();
+    let aggregation_task = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(FLOW_AGGREGATION_WINDOW_SECS)).await;
+            let mut agg = aggregation_aggregator.lock().await;
+            agg.calculate_top_talkers();
+            agg.calculate_protocol_distribution();
+            
+            let summary = agg.generate_flow_summary();
+            if let Err(e) = agg.send_to_backend(&summary).await {
+                log::error!("Failed to send flow summary to backend: {}", e);
+            } else {
+                log::info!("FlowSummary published to Redis. Active flows: {}", agg.flows_count());
+            }
+        }
+    });
+
     // Main async processing loop
     loop {
         tokio::select! {
@@ -145,20 +173,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     log::warn!("Malformed Ethernet packet received via channel.");
                 }
             }
-            _ = async {
-                let mut agg = flow_aggregator_arc.lock().await;
-                agg.tick_cleanup().await;
-            } => {
-                log::debug!("Cleanup tick completed");
-            }
-            _ = async {
-                let mut agg = flow_aggregator_arc.lock().await;
-                agg.tick_aggregation().await;
-            } => {
-                log::debug!("Aggregation tick completed");
-            }
             _ = tokio::signal::ctrl_c() => {
                 log::info!("Ctrl-C received, shutting down.");
+                cleanup_task.abort();
+                aggregation_task.abort();
                 break;
             }
         }

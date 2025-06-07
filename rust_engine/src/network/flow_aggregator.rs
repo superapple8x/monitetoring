@@ -80,6 +80,10 @@ impl FlowAggregator {
         }
     }
     
+    pub fn flows_count(&self) -> usize {
+        self.flows.len()
+    }
+    
     pub async fn process_packet(
         &mut self,
         src_ip: IpAddr,
@@ -118,7 +122,7 @@ impl FlowAggregator {
         self.update_aggregation_stats().await;
     }
     
-    fn cleanup_expired_flows(&mut self) {
+    pub fn cleanup_expired_flows(&mut self) {
         let now = SystemTime::now();
         let timeout = self.flow_timeout;
         
@@ -144,7 +148,7 @@ impl FlowAggregator {
         tracing::debug!("Aggregation stats updated and sent. Active flows: {}", self.flows.len());
     }
     
-    fn calculate_top_talkers(&mut self) {
+    pub fn calculate_top_talkers(&mut self) {
         let mut talker_stats: HashMap<IpAddr, (u64, u64, u32, Vec<u8>)> = HashMap::new(); 
         
         for flow in self.flows.values() {
@@ -176,7 +180,7 @@ impl FlowAggregator {
         self.top_talkers_by_packets = talkers.iter().take(10).cloned().collect();
     }
     
-    fn calculate_protocol_distribution(&mut self) {
+    pub fn calculate_protocol_distribution(&mut self) {
         let mut current_protocol_stats: HashMap<u8, (u32, u64, u64)> = HashMap::new(); 
         let mut grand_total_flows = 0u32;
         let mut grand_total_bytes = 0u64;
@@ -206,7 +210,7 @@ impl FlowAggregator {
         }
     }
     
-    fn generate_flow_summary(&self) -> FlowSummary {
+    pub fn generate_flow_summary(&self) -> FlowSummary {
         let active_flows_count = self.flows.len() as u32;
         let total_flows_in_window = active_flows_count; 
         let bandwidth_stats = self.calculate_bandwidth_stats_for_summary();
@@ -253,7 +257,7 @@ impl FlowAggregator {
         }
     }
     
-    async fn send_to_backend(&self, summary: &FlowSummary) -> Result<(), redis::RedisError> {
+    pub async fn send_to_backend(&self, summary: &FlowSummary) -> Result<(), redis::RedisError> {
         let redis_url = std::env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379/".to_string());
         let client = redis::Client::open(redis_url)?;
         let mut con = client.get_multiplexed_async_connection().await?; 
