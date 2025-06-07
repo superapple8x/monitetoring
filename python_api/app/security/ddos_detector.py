@@ -163,8 +163,8 @@ class DDoSDetector:
 
             if protocol == 6: # TCP
                 if connection_state in ['syn_sent', 'synsent']: # SYN from source
-                    source_stats.syn_packets += 1
-                    self.current_window_target_syn_counts[dst_ip] += 1
+                    source_stats.syn_packets += packets_sent  # Count all SYN packets in this flow
+                    self.current_window_target_syn_counts[dst_ip] += packets_sent  # Count all SYN packets to this target
                     if source_stats.connection_count == 1 : # First packet of a flow from this source
                          self.current_window_new_connections +=1
                 if dst_port in [80, 443, 8080, 8443]: # Basic HTTP/S request tracking
@@ -277,7 +277,7 @@ class DDoSDetector:
 
     def _calculate_median_baseline(self, history: Deque[float]) -> float:
         if not history: return 1.0 # Avoid division by zero, assume a minimal baseline
-        return statistics.median(history) if len(history) > len(history.maxlen)//2 else sum(history)/len(history) # Median if enough data, else avg
+        return statistics.median(history) if len(history) > history.maxlen//2 else sum(history)/len(history) # Median if enough data, else avg
 
     def _get_top_sources_by_bytes(self) -> List[SourceIPSummary]:
         return sorted(

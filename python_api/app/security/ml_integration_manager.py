@@ -41,6 +41,10 @@ class MLIntegrationManager:
         else:
             print(f"Info: Model {model_id} was not active or not registered.")
 
+    def get_active_models(self) -> List[MLModelAdapter]:
+        """Get list of active model adapters."""
+        return [self.models[model_id] for model_id in self.active_model_ids if model_id in self.models]
+
     async def analyze_flow_with_ml(self, network_flow_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         Analyze a single network flow with all active ML models.
