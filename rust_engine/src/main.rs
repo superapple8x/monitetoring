@@ -6,16 +6,17 @@ use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::udp::UdpPacket;
 use pnet::packet::Packet;
-use pnet::packet::ip::IpNextHeaderProtocol;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::util::MacAddr;
+use log::LevelFilter;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
 use std::net::{IpAddr, Ipv4Addr};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH}; // Removed Duration
-use redis::Commands; // For Redis commands
+use redis::AsyncCommands; // For async Redis commands
 
 // Declare network module
 mod network;
@@ -32,76 +33,12 @@ const FLOW_AGGREGATOR_CLEANUP_INTERVAL_SECS: u64 = 60; // How often FlowAggregat
 // const NETWORK_METRICS_CHANNEL: &str = "network_metrics_channel"; // For the old system
 const DEVICE_DISCOVERY_CHANNEL: &str = "device_discovery_channel";
 
-
-// Structs for the old metrics system (can be removed if fully deprecated)
-#[derive(Debug, Clone, Hash, Eq, PartialEq, Serialize)]
-struct PublishedFlowKey {
-    src_ip: String,
-    dst_ip: String,
-    src_port: u16,
-    dst_port: u16,
-    protocol: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct PublishedFlowData {
-    packet_count: u64,
-    byte_count: u64,
-    first_seen: u64,
-    last_seen: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-struct PublishedFlow {
-    key: PublishedFlowKey,
-    data: PublishedFlowData,
-}
-
-#[derive(Debug, Clone, Serialize, Default)]
-struct PublishedInterfaceMetrics {
-    timestamp: u64,
-    interface_name: String,
-    packets_in: u64,
-    packets_out: u64,
-    bytes_in: u64,
-    bytes_out: u64,
-    active_flows: Vec<PublishedFlow>,
-}
-
-
 #[derive(Debug, Clone, Serialize)]
 struct PublishedDiscoveredDevice {
     ip_addr: String,
     mac_addr: String,
     last_seen: u64,
     timestamp: u64,
-}
-
-// Original structs for internal aggregation (used by old system)
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
-struct FlowKey {
-    src_ip: IpAddr,
-    dst_ip: IpAddr,
-    src_port: u16,
-    dst_port: u16,
-    protocol: IpNextHeaderProtocol,
-}
-
-#[derive(Debug, Clone)]
-struct FlowData {
-    packet_count: u64,
-    byte_count: u64,
-    first_seen: u64,
-    last_seen: u64,
-}
-
-#[derive(Debug, Clone, Default)]
-struct InterfaceAggregatedMetrics {
-    packets_in: u64,
-    packets_out: u64,
-    bytes_in: u64,
-    bytes_out: u64,
-    active_flows: HashMap<FlowKey, FlowData>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,18 +49,22 @@ struct DiscoveredDevice {
 }
 
 type DeviceCache = Arc<Mutex<HashMap<MacAddr, DiscoveredDevice>>>;
-// type MetricCache = Arc<Mutex<InterfaceAggregatedMetrics>>; // Old system
 
-fn get_redis_connection() -> redis::RedisResult<redis::Connection> {
+async fn get_redis_connection() -> redis::RedisResult<redis::aio::MultiplexedConnection> {
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
     let client = redis::Client::open(redis_url)?;
-    client.get_connection()
+    client.get_multiplexed_async_connection().await
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::init();
+    // Initialize logger
+    env_logger::Builder::new()
+        .filter_level(LevelFilter::Info)
+        .filter_module("rust_engine", LevelFilter::Trace)
+        .init();
 
+    // Interface selection logic (remains the same)
     let interface_name = env::args().nth(1).unwrap_or_else(|| {
         log::warn!("No interface name provided, attempting to find a default.");
         let interfaces = datalink::interfaces();
@@ -147,114 +88,74 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let interfaces = datalink::interfaces();
-    log::info!("Available network interfaces:");
-    for iface in interfaces.iter() {
-        log::info!("  {}: UP: {}, Loopback: {}, MAC: {:?}, IPs: {:?}", 
-                 iface.name, iface.is_up(), iface.is_loopback(), iface.mac, iface.ips);
-    }
-
     let interface = interfaces
+        .clone()
         .into_iter()
         .find(|iface: &NetworkInterface| iface.name == interface_name)
         .ok_or_else(|| format!("Interface {} not found", interface_name))?;
 
     log::info!("Starting packet capture on interface: {}", interface.name);
 
-    let (_, mut rx) = match datalink::channel(&interface, Default::default()) {
-        Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
-        Ok(_) => panic!("Unhandled channel type"),
-        Err(e) => {
-            log::error!("An error occurred when creating the datalink channel: {}", e);
-            std::process::exit(1);
+    // Create an MPSC channel for passing packet data from capture thread to processing task
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<u8>>(1000);
+
+    let interface_name_for_loop = interface.name.clone();
+
+    // Spawn a dedicated thread for the blocking packet capture
+    std::thread::spawn(move || {
+        let (_, mut pnet_rx) = match datalink::channel(&interface, Default::default()) {
+            Ok(Channel::Ethernet(tx, rx)) => (tx, rx),
+            Ok(_) => panic!("Unhandled channel type"),
+            Err(e) => {
+                log::error!("Failed to create datalink channel: {}", e);
+                return;
+            }
+        };
+        
+        loop {
+            match pnet_rx.next() {
+                Ok(packet) => {
+                    if tx.blocking_send(packet.to_vec()).is_err() {
+                        log::error!("Failed to send packet to processing task. Channel closed.");
+                        break;
+                    }
+                }
+                Err(e) => {
+                    log::error!("An error occurred while reading from interface: {}", e);
+                    break;
+                }
+            }
         }
-    };
+    });
 
     let device_cache: DeviceCache = Arc::new(Mutex::new(HashMap::new()));
-
-    // Instantiate FlowAggregator
     let flow_aggregator_arc = Arc::new(Mutex::new(FlowAggregator::new(
         FLOW_TIMEOUT_SECS,
         FLOW_AGGREGATION_WINDOW_SECS,
         FLOW_AGGREGATOR_CLEANUP_INTERVAL_SECS,
     )));
 
-    // Periodic Metric Publisher Task (Old system - Commented out)
-    /*
-    // const METRICS_PUBLISH_INTERVAL_SECS: u64 = 5; // Defined above
-    // const NETWORK_METRICS_CHANNEL: &str = "network_metrics_channel"; // Defined above
-    // type MetricCache = Arc<Mutex<InterfaceAggregatedMetrics>>; // Defined above
-    // let metric_cache: MetricCache = Arc::new(Mutex::new(InterfaceAggregatedMetrics::default()));
-    // let interface_name_clone = interface.name.clone(); 
-    // let metric_cache_publisher_clone = metric_cache.clone();
-    // let if_name_for_metrics = interface_name_clone.clone();
-    // tokio::spawn(async move {
-    //     let mut interval = tokio::time::interval(std::time::Duration::from_secs(METRICS_PUBLISH_INTERVAL_SECS));
-    //     loop {
-    //         interval.tick().await;
-    //         let mut metrics_guard = metric_cache_publisher_clone.lock().unwrap();
-    //         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-
-    //         metrics_guard.active_flows.retain(|_, flow_data| {
-    //             now.saturating_sub(flow_data.last_seen) < FLOW_TIMEOUT_SECS
-    //         });
-
-    //         let published_metrics = PublishedInterfaceMetrics {
-    //             timestamp: now,
-    //             interface_name: if_name_for_metrics.clone(),
-    //             packets_in: metrics_guard.packets_in,
-    //             packets_out: metrics_guard.packets_out,
-    //             bytes_in: metrics_guard.bytes_in,
-    //             bytes_out: metrics_guard.bytes_out,
-    //             active_flows: metrics_guard.active_flows.iter().map(|(k, v)| PublishedFlow {
-    //                 key: PublishedFlowKey {
-    //                     src_ip: k.src_ip.to_string(),
-    //                     dst_ip: k.dst_ip.to_string(),
-    //                     src_port: k.src_port,
-    //                     dst_port: k.dst_port,
-    //                     protocol: format!("{:?}", k.protocol),
-    //                 },
-    //                 data: PublishedFlowData {
-    //                     packet_count: v.packet_count,
-    //                     byte_count: v.byte_count,
-    //                     first_seen: v.first_seen,
-    //                     last_seen: v.last_seen,
-    //                 },
-    //             }).collect(),
-    //         };
-            
-    //         match get_redis_connection() {
-    //             Ok(mut conn) => {
-    //                 match serde_json::to_string(&published_metrics) {
-    //                     Ok(json_payload) => {
-    //                         match conn.publish::<&str, String, usize>(NETWORK_METRICS_CHANNEL, json_payload.clone()) {
-    //                             Ok(_) => log::info!("Published metrics to Redis ({} flows).", published_metrics.active_flows.len()),
-    //                             Err(e) => log::error!("Failed to publish metrics to Redis: {}", e),
-    //                         };
-    //                     }
-    //                     Err(e) => log::error!("Failed to serialize metrics: {}", e),
-    //                 }
-    //             }
-    //             Err(e) => log::error!("Failed to get Redis connection for metrics: {}", e),
-    //         }
-    //     }
-    // });
-    */
-
+    // Main async processing loop
     loop {
         tokio::select! {
-            packet_result = async { rx.next() } => {
-                match packet_result {
-                    Ok(packet_data) => {
-                        if let Some(ethernet_packet) = EthernetPacket::new(packet_data) {
-                             handle_ethernet_packet(&interface, &ethernet_packet, device_cache.clone(), flow_aggregator_arc.clone()).await;
-                        } else {
-                            log::warn!("Malformed Ethernet packet received.");
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("An error occurred while reading: {}", e);
-                    }
+            Some(packet_data) = rx.recv() => {
+                if let Some(ethernet_packet) = EthernetPacket::new(&packet_data) {
+                    handle_ethernet_packet(&interface_name_for_loop, &ethernet_packet, device_cache.clone(), flow_aggregator_arc.clone()).await;
+                } else {
+                    log::warn!("Malformed Ethernet packet received via channel.");
                 }
+            }
+            _ = async {
+                let mut agg = flow_aggregator_arc.lock().await;
+                agg.tick_cleanup().await;
+            } => {
+                log::debug!("Cleanup tick completed");
+            }
+            _ = async {
+                let mut agg = flow_aggregator_arc.lock().await;
+                agg.tick_aggregation().await;
+            } => {
+                log::debug!("Aggregation tick completed");
             }
             _ = tokio::signal::ctrl_c() => {
                 log::info!("Ctrl-C received, shutting down.");
@@ -262,11 +163,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+
     Ok(())
 }
 
 async fn handle_ethernet_packet(
-    interface: &NetworkInterface,
+    interface_name: &str,
     ethernet: &EthernetPacket<'_>, // Added lifetime
     device_cache: DeviceCache,
     flow_aggregator_arc: Arc<Mutex<FlowAggregator>>,
@@ -296,12 +198,12 @@ async fn handle_ethernet_packet(
                 };
 
                 if src_port != 0 && dst_port != 0 {
-                    let mut agg = flow_aggregator_arc.lock().unwrap();
+                    let mut agg = flow_aggregator_arc.lock().await;
                     agg.process_packet(src_ip, dst_ip, src_port, dst_port, protocol_u8, packet_length, tcp_flags).await;
                 }
                  log::trace!(
                     "[{}] IPv4 | {} -> {} | Proto: {:?} | Len: {} bytes",
-                    interface.name, src_ip, dst_ip, protocol_type, packet_length
+                    interface_name, src_ip, dst_ip, protocol_type, packet_length
                 );
             }
         }
@@ -318,7 +220,7 @@ async fn handle_ethernet_packet(
                         last_seen: current_time,
                     };
 
-                    let mut cache = device_cache.lock().unwrap();
+                    let mut cache = device_cache.lock().await;
                     let mut publish_update = true;
 
                     if let Some(existing_device) = cache.get(&sender_mac) {
@@ -332,7 +234,7 @@ async fn handle_ethernet_packet(
                     if publish_update {
                         log::info!(
                             "[{}] ARP: Discovered/Updated Device - MAC: {}, IP: {}. Publishing to Redis.",
-                            interface.name, sender_mac, sender_ip
+                            interface_name, sender_mac, sender_ip
                         );
                         let published_device = PublishedDiscoveredDevice {
                             ip_addr: device_info.ip_addr.to_string(),
@@ -340,11 +242,11 @@ async fn handle_ethernet_packet(
                             last_seen: device_info.last_seen,
                             timestamp: current_time,
                         };
-                        match get_redis_connection() {
+                        match get_redis_connection().await {
                             Ok(mut conn) => {
                                 match serde_json::to_string(&published_device) {
                                     Ok(json_payload) => {
-                                        let _: () = match conn.publish::<&str, String, i32>(DEVICE_DISCOVERY_CHANNEL, json_payload) {
+                                        let _: () = match conn.publish::<&str, String, i32>(DEVICE_DISCOVERY_CHANNEL, json_payload).await {
                                             Ok(_) => log::debug!("Published device {} to Redis.", sender_mac),
                                             Err(e) => log::error!("Failed to publish device to Redis: {}", e),
                                         };
@@ -355,16 +257,16 @@ async fn handle_ethernet_packet(
                             Err(e) => log::error!("Failed to get Redis connection for device: {}", e),
                         }
                     } else {
-                         log::trace!("[{}] ARP: Device {} already recently published or updated.", interface.name, sender_mac);
+                         log::trace!("[{}] ARP: Device {} already recently published or updated.", interface_name, sender_mac);
                     }
                 } else {
                      log::debug!(
                         "[{}] ARP Packet ignored (zero MAC/IP): Sender MAC: {}, Sender IP: {}",
-                        interface.name, sender_mac, sender_ip
+                        interface_name, sender_mac, sender_ip
                     );
                 }
             } else {
-                log::warn!("[{}] Malformed ARP Packet", interface.name);
+                log::warn!("[{}] Malformed ARP Packet", interface_name);
             }
         }
         EtherTypes::Ipv6 => {
@@ -389,19 +291,19 @@ async fn handle_ethernet_packet(
                 };
 
                 if src_port != 0 && dst_port != 0 {
-                    let mut agg = flow_aggregator_arc.lock().unwrap();
+                    let mut agg = flow_aggregator_arc.lock().await;
                     agg.process_packet(src_ip, dst_ip, src_port, dst_port, protocol_u8, packet_length, tcp_flags).await;
                 }
                 log::trace!(
                     "[{}] IPv6 | {} -> {} | Proto: {:?} | Len: {} bytes",
-                    interface.name, src_ip, dst_ip, protocol_type, packet_length
+                    interface_name, src_ip, dst_ip, protocol_type, packet_length
                 );
             }
         }
         _ => {
             log::trace!(
                 "[{}] Unknown/Unsupported EtherType: {:?}; Length: {}",
-                interface.name,
+                interface_name,
                 ethernet.get_ethertype(),
                 ethernet.payload().len()
             );

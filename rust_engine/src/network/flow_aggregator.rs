@@ -106,11 +106,15 @@ impl FlowAggregator {
         });
         
         flow.update_with_packet(packet_size, direction, tcp_flags);
-        
-        self.cleanup_timer.tick().await; 
+    }
+    
+    pub async fn tick_cleanup(&mut self) {
+        self.cleanup_timer.tick().await;
         self.cleanup_expired_flows();
-        
-        self.aggregation_timer.tick().await; 
+    }
+    
+    pub async fn tick_aggregation(&mut self) {
+        self.aggregation_timer.tick().await;
         self.update_aggregation_stats().await;
     }
     
