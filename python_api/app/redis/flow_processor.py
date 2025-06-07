@@ -2,15 +2,12 @@
 import redis.asyncio as redis
 import json
 import asyncio
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
+import logging
 
-# Assuming your project structure allows these imports
-# Adjust paths as necessary if your structure is different.
-# For example, if 'app' is the root for these modules:
-# from app.api.monitoring_endpoints import analyze_flows_for_threats # This might cause circular dependency
-# It's better to have a dedicated security analysis service.
-# For now, we'll define a placeholder for the analysis trigger.
+# Import the new intelligent monitoring system
+from ..monitoring.intelligent_network_monitor import IntelligentNetworkMonitor, NetworkHealthReport
 
 # Placeholder for database interaction functions (to be implemented in a db service module)
 async def store_flow_summary_in_db(flow_summary_data: Dict[str, Any], db_session: Any):
@@ -29,26 +26,52 @@ async def store_flow_summary_in_db(flow_summary_data: Dict[str, Any], db_session
     #     await session.commit()
     pass
 
-async def trigger_security_analysis_service(analysis_data: Dict[str, Any], db_session: Any):
-    """Placeholder: Triggers the security analysis pipeline."""
-    # This function will:
-    # 1. Instantiate/get security detectors (PortScan, DDoS, MLManager).
-    # 2. Call their respective analysis methods with analysis_data.
-    # 3. Collect alerts.
-    # 4. Store alerts in the database.
-    print(f"Placeholder: Triggering security analysis for data timestamp {analysis_data.get('timestamp')}")
-    # Example:
-    # from app.security.port_scan_detector import PortScanDetector
-    # from app.security.ddos_detector import DDoSDetector
-    # from app.security.ml_integration_manager import ml_manager # Assuming a global/singleton manager
-    # from app.services.alert_service import store_alerts_in_db
-    #
-    # port_scan_alerts = PortScanDetector().analyze_flows(analysis_data.get("flows", []))
-    # ddos_alerts = DDoSDetector().analyze_traffic_and_bandwidth(analysis_data.get("flows", []), analysis_data.get("bandwidth_stats", {}))
-    # ml_alerts = await ml_manager.analyze_flow_with_ml(analysis_data) # if analyzing summary, or iterate flows
-    # combined_alerts = format_and_combine(port_scan_alerts, ddos_alerts, ml_alerts)
-    # await store_alerts_in_db(combined_alerts, db_session)
-    pass
+async def analyze_network_health_with_intelligence(flow_summary_data: Dict[str, Any], 
+                                                  intelligent_monitor: IntelligentNetworkMonitor) -> NetworkHealthReport:
+    """
+    Analyze network health using the intelligent monitoring system.
+    Combines security and performance analysis for superior insights.
+    """
+    try:
+        # The flow_summary_data from Rust now includes security_awareness
+        health_report = await intelligent_monitor.analyze_network_health(flow_summary_data)
+        
+        logging.info(f"Network health analysis complete: Score {health_report.overall_health_score:.2f}, "
+                    f"Threats: {len(health_report.security_status.active_threats)}")
+        
+        # Log important insights
+        if health_report.overall_health_score < 0.5:
+            logging.warning(f"Poor network health detected: {health_report.correlation_insights}")
+        
+        if health_report.security_status.active_threats:
+            logging.warning(f"Active security threats: {health_report.security_status.active_threats}")
+        
+        return health_report
+        
+    except Exception as e:
+        logging.error(f"Error in intelligent network health analysis: {e}")
+        # Return a basic health report with error status
+        from ..monitoring.intelligent_network_monitor import NetworkPerformanceAnalysis, SecurityThreatAnalysis
+        return NetworkHealthReport(
+            timestamp=datetime.utcnow(),
+            performance=NetworkPerformanceAnalysis(
+                average_latency_ms=0.0,
+                jitter_ms=0.0,
+                packet_loss_percentage=0.0,
+                throughput_mbps=0.0,
+                connection_success_rate=1.0,
+                performance_score=0.5
+            ),
+            security_status=SecurityThreatAnalysis(
+                threat_level='unknown',
+                active_threats=[],
+                confidence_score=0.0,
+                affected_assets=[]
+            ),
+            overall_health_score=0.5,
+            correlation_insights=["Error analyzing network health"],
+            recommended_actions=["Check monitoring system status"]
+        )
 
 
 class FlowProcessor:
@@ -57,6 +80,10 @@ class FlowProcessor:
         self.redis_client = redis.from_url(redis_url)
         self.is_processing = False
         self.processing_task: Optional[asyncio.Task] = None
+        
+        # Initialize the intelligent network monitor
+        self.intelligent_monitor = IntelligentNetworkMonitor()
+        self.latest_health_report: Optional[NetworkHealthReport] = None
 
     async def _subscribe_and_process(self):
         pubsub = self.redis_client.pubsub()
@@ -92,44 +119,72 @@ class FlowProcessor:
 
     async def process_single_flow_summary(self, flow_summary_data: Dict[str, Any]):
         """
-        Process an individual flow summary received from Redis.
-        This includes storing historical data and triggering security analysis.
+        Process an individual flow summary received from Redis using intelligent monitoring.
+        This includes storing historical data and performing intelligent network health analysis.
         """
-        # In a real application, you'd use a dependency injection system or pass a DB session factory
-        db_session_placeholder = None # Replace with actual DB session management
+        try:
+            # 1. Store historical monitoring data from the summary
+            db_session_placeholder = None  # Replace with actual DB session management
+            await store_flow_summary_in_db(flow_summary_data, db_session_placeholder)
 
-        # 1. Store historical monitoring data from the summary
-        # This needs to map fields from FlowSummary (Rust) to DB models (Python)
-        # e.g., bandwidth_history, top_talkers_history, protocol_distribution_history
-        await store_flow_summary_in_db(flow_summary_data, db_session_placeholder)
-
-        # 2. Prepare data for security analysis
-        # The `FlowSummary` itself might be enough, or you might extract specific parts.
-        # The plan mentioned `extract_flows_for_analysis` - if individual flows are embedded in summary.
-        # For now, assume `flow_summary_data` contains what's needed or can be adapted.
-        # The DDoS detector expects `flows` list and `bandwidth_stats` dict.
-        # PortScan expects `flows` list. ML manager expects a flow dict.
-        # This implies the Rust `FlowSummary` should ideally contain a list of individual flow details
-        # if per-flow ML/PortScan analysis is desired at this stage.
-        # If not, these detectors might need to operate on aggregated data or this part needs rethink.
-        
-        # For now, let's assume `flow_summary_data` is passed and detectors/services adapt.
-        # A more refined `analysis_data` structure might be:
-        analysis_data_for_security = {
-            "timestamp": flow_summary_data.get("timestamp"),
-            "flows": flow_summary_data.get("detailed_flows", []), # Assuming detailed_flows might be part of summary
-            "bandwidth_stats": flow_summary_data.get("bandwidth_usage", {}),
-            "aggregated_metrics": flow_summary_data # Pass the whole summary for context
-        }
-        
-        # 3. Trigger security analysis (asynchronously)
-        # This should not block the processing of further Redis messages.
-        asyncio.create_task(trigger_security_analysis_service(analysis_data_for_security, db_session_placeholder))
-
-        # 4. (Optional) Broadcast to WebSockets if needed for live raw summary view
-        # This is separate from security alerts which would be broadcast by the alert service.
-        # await self.broadcast_to_websockets("flow_summary_update", flow_summary_data)
-        print(f"FlowProcessor: Finished processing summary for {flow_summary_data.get('timestamp')}")
+            # 2. Perform intelligent network health analysis
+            # This combines security and performance analysis using the enhanced data from Rust
+            health_report = await analyze_network_health_with_intelligence(
+                flow_summary_data, self.intelligent_monitor
+            )
+            
+            # Store the latest health report for API access
+            self.latest_health_report = health_report
+            
+            # 3. Broadcast intelligent insights to WebSocket clients
+            await self.broadcast_intelligent_insights(health_report)
+            
+            # 4. Log important findings
+            if health_report.security_status.active_threats:
+                logging.warning(f"Security threats detected: {health_report.security_status.active_threats}")
+                
+            if health_report.overall_health_score < 0.7:
+                logging.info(f"Network health attention needed: {health_report.recommended_actions}")
+            
+            logging.debug(f"FlowProcessor: Intelligent analysis complete for {flow_summary_data.get('timestamp')}")
+            
+        except Exception as e:
+            logging.error(f"FlowProcessor: Error processing flow summary: {e}")
+    
+    async def broadcast_intelligent_insights(self, health_report: NetworkHealthReport):
+        """Broadcast intelligent network insights to WebSocket clients"""
+        try:
+            insights_payload = {
+                "type": "INTELLIGENT_NETWORK_INSIGHTS",
+                "payload": {
+                    "timestamp": health_report.timestamp.isoformat(),
+                    "overall_health_score": health_report.overall_health_score,
+                    "security_status": {
+                        "threat_level": health_report.security_status.threat_level,
+                        "active_threats": health_report.security_status.active_threats,
+                        "confidence_score": health_report.security_status.confidence_score,
+                        "affected_assets": health_report.security_status.affected_assets
+                    },
+                    "performance_metrics": {
+                        "average_latency_ms": health_report.performance.average_latency_ms,
+                        "throughput_mbps": health_report.performance.throughput_mbps,
+                        "performance_score": health_report.performance.performance_score
+                    },
+                    "correlation_insights": health_report.correlation_insights,
+                    "recommended_actions": health_report.recommended_actions,
+                    "performance_impact_of_attacks": health_report.performance_impact_of_attacks
+                }
+            }
+            
+            await self.redis_client.publish("websocket_updates", json.dumps(insights_payload))
+            logging.debug("Broadcast intelligent insights to WebSocket clients")
+            
+        except Exception as e:
+            logging.error(f"FlowProcessor: Failed to broadcast intelligent insights: {e}")
+    
+    def get_latest_health_report(self) -> Optional[NetworkHealthReport]:
+        """Get the latest network health report for API access"""
+        return self.latest_health_report
 
     async def broadcast_to_websockets(self, event_type: str, data: Dict[str, Any]):
         """Placeholder: Broadcast data to WebSocket clients via another Redis channel."""

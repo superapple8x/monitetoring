@@ -43,3 +43,5 @@ dump.rdb
 plans/
 
 test_resource/
+test_phase4_intelligent_monitoring.py
+PHASE4_IMPLEMENTATION_SUMMARY.md

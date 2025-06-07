@@ -17,6 +17,9 @@ from .redis.flow_processor import FlowProcessor
 from .api.monitoring_endpoints import router as monitoring_router
 from .api.security_endpoints import router as security_router
 
+# Import Phase 4 intelligent monitoring
+from .api.intelligent_monitoring_endpoints import router as intelligent_monitoring_router, set_flow_processor
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -83,6 +86,9 @@ app.add_middleware(
 # --- Include Phase 3 API Routers ---
 app.include_router(monitoring_router)
 app.include_router(security_router)
+
+# --- Include Phase 4 Intelligent Monitoring Router ---
+app.include_router(intelligent_monitoring_router)
 
 # --- Connection Manager for WebSockets ---
 class ConnectionManager:
@@ -272,27 +278,31 @@ flow_processor_task = None
 @app.on_event("startup")
 async def startup_event():
     global flow_processor, flow_processor_task
-    logger.info("Starting Phase 3 Network Monitoring API...")
+    logger.info("Starting Phase 4 Intelligent Network Monitoring API...")
     
     # Start traditional Redis subscribers
     logger.info("Starting Redis subscriber tasks...")
     asyncio.create_task(metrics_subscriber(SessionLocal, manager))
     asyncio.create_task(device_subscriber(SessionLocal, manager))
     
-    # Start Phase 3 FlowProcessor
-    logger.info("Starting Phase 3 FlowProcessor...")
+    # Start Phase 4 Enhanced FlowProcessor with Intelligent Monitoring
+    logger.info("Starting Phase 4 Enhanced FlowProcessor with Intelligent Monitoring...")
     flow_processor = FlowProcessor(REDIS_URL)
+    
+    # Set the flow processor for the intelligent monitoring endpoints
+    set_flow_processor(flow_processor)
+    
     flow_processor_task = asyncio.create_task(flow_processor.start_processing())
     
-    logger.info("Phase 3 Network Monitoring API startup complete!")
+    logger.info("Phase 4 Intelligent Network Monitoring API startup complete!")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     global flow_processor, flow_processor_task
-    logger.info("Shutting down Phase 3 Network Monitoring API...")
+    logger.info("Shutting down Phase 4 Intelligent Network Monitoring API...")
     
     if flow_processor:
-        logger.info("Stopping FlowProcessor...")
+        logger.info("Stopping Enhanced FlowProcessor...")
         await flow_processor.stop_processing()
     if flow_processor_task:
         flow_processor_task.cancel()
@@ -301,20 +311,24 @@ async def shutdown_event():
         except asyncio.CancelledError:
             pass
     
-    logger.info("Phase 3 Network Monitoring API shutdown complete!")
+    logger.info("Phase 4 Intelligent Network Monitoring API shutdown complete!")
 
 # --- Root Endpoint ---
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to the Network Monitoring API - Phase 3",
-        "version": "3.0.0",
+        "message": "Welcome to the Intelligent Network Monitoring API - Phase 4",
+        "version": "4.0.0",
         "features": [
             "Enhanced Flow Monitoring",
             "Security Detection (Port Scans, DDoS)",
             "ML Integration Framework",
             "Historical Data Analysis",
-            "Real-time Alerts"
+            "Real-time Alerts",
+            "Intelligent Network Health Analysis",
+            "Security-Performance Correlation",
+            "Predictive Monitoring Insights",
+            "Advanced Alerting with Context"
         ]
     }
 

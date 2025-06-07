@@ -17,7 +17,8 @@ pub struct FlowAggregator {
     protocol_distribution: HashMap<u8, ProtocolStats>,
     
     cleanup_timer: Interval,
-    aggregation_timer: Interval, 
+    aggregation_timer: Interval,
+    security_awareness: SecurityAwareFlowMetrics,
 }
 
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
@@ -39,6 +40,33 @@ pub struct TopTalker {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SecurityMetrics {
+    pub is_ddos_attempt: bool,
+    pub port_scan_detected: bool,
+    pub suspicious_ips: Vec<IpAddr>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PerformanceMetrics {
+    pub average_latency_ms: f32,
+    pub jitter_ms: f32,
+    pub packet_loss_percentage: f32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HealthCorrelation {
+    pub health_score: f32, // 0.0 (bad) to 1.0 (good)
+    pub status_message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SecurityAwareFlowMetrics {
+    pub suspicious_activity_indicators: SecurityMetrics,
+    pub performance_impact_of_attacks: PerformanceMetrics,
+    pub network_health_correlation: HealthCorrelation,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct ProtocolStats {
     pub protocol: u8,
     pub flows_count: u32,
@@ -57,6 +85,7 @@ pub struct FlowSummary {
     pub top_talkers_packets: Vec<TopTalker>,
     pub protocol_distribution: Vec<ProtocolStats>,
     pub bandwidth_usage: BandwidthStats,
+    pub security_awareness: SecurityAwareFlowMetrics,
 }
 
 #[derive(Debug, Serialize)]
@@ -77,6 +106,22 @@ impl FlowAggregator {
             protocol_distribution: HashMap::new(),
             cleanup_timer: interval(Duration::from_secs(cleanup_interval_secs)),
             aggregation_timer: interval(Duration::from_secs(aggregation_window_secs)),
+            security_awareness: SecurityAwareFlowMetrics {
+                suspicious_activity_indicators: SecurityMetrics {
+                    is_ddos_attempt: false,
+                    port_scan_detected: false,
+                    suspicious_ips: vec![],
+                },
+                performance_impact_of_attacks: PerformanceMetrics {
+                    average_latency_ms: 0.0,
+                    jitter_ms: 0.0,
+                    packet_loss_percentage: 0.0,
+                },
+                network_health_correlation: HealthCorrelation {
+                    health_score: 1.0,
+                    status_message: "Network health is optimal.".to_string(),
+                },
+            },
         }
     }
     
@@ -223,6 +268,7 @@ impl FlowAggregator {
             top_talkers_packets: self.top_talkers_by_packets.clone(),
             protocol_distribution: self.protocol_distribution.values().cloned().collect(),
             bandwidth_usage: bandwidth_stats,
+            security_awareness: self.security_awareness.clone(),
         }
     }
     
