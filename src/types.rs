@@ -1,6 +1,25 @@
 use serde::Serialize;
 use std::collections::HashMap;
 
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    const THRESHOLD: f64 = 1024.0;
+    
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    
+    let bytes_f = bytes as f64;
+    let unit_index = (bytes_f.log(THRESHOLD).floor() as usize).min(UNITS.len() - 1);
+    let size = bytes_f / THRESHOLD.powi(unit_index as i32);
+    
+    if unit_index == 0 {
+        format!("{} {}", bytes, UNITS[unit_index])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit_index])
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
 pub struct Connection {
     pub source_port: u16,
@@ -16,6 +35,29 @@ pub struct ProcessInfo {
     pub sent: u64,
     pub received: u64,
     pub container_name: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+pub struct ProcessInfoFormatted {
+    pub name: String,
+    pub sent_bytes: u64,
+    pub sent_formatted: String,
+    pub received_bytes: u64,
+    pub received_formatted: String,
+    pub container_name: Option<String>,
+}
+
+impl From<&ProcessInfo> for ProcessInfoFormatted {
+    fn from(info: &ProcessInfo) -> Self {
+        ProcessInfoFormatted {
+            name: info.name.clone(),
+            sent_bytes: info.sent,
+            sent_formatted: format_bytes(info.sent),
+            received_bytes: info.received,
+            received_formatted: format_bytes(info.received),
+            container_name: info.container_name.clone(),
+        }
+    }
 }
 
 #[derive(Clone)]

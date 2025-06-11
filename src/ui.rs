@@ -13,6 +13,25 @@ use crossterm::{
 };
 use crate::types::{App, SortColumn, ProcessInfo};
 
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    const THRESHOLD: f64 = 1024.0;
+    
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    
+    let bytes_f = bytes as f64;
+    let unit_index = (bytes_f.log(THRESHOLD).floor() as usize).min(UNITS.len() - 1);
+    let size = bytes_f / THRESHOLD.powi(unit_index as i32);
+    
+    if unit_index == 0 {
+        format!("{} {}", bytes, UNITS[unit_index])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit_index])
+    }
+}
+
 pub fn setup_terminal() -> Result<Terminal<CrosstermBackend<io::Stdout>>, io::Error> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -66,16 +85,16 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
                 Row::new(vec![
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
-                    Cell::from(data.sent.to_string()),
-                    Cell::from(data.received.to_string()),
+                    Cell::from(format_bytes(data.sent)),
+                    Cell::from(format_bytes(data.received)),
                     Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
                 ])
             } else {
                 Row::new(vec![
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
-                    Cell::from(data.sent.to_string()),
-                    Cell::from(data.received.to_string()),
+                    Cell::from(format_bytes(data.sent)),
+                    Cell::from(format_bytes(data.received)),
                 ])
             }
         });

@@ -16,7 +16,7 @@ use std::io;
 use std::thread;
 
 use config::{Cli, reset_config};
-use types::{App, ProcessInfo, Connection};
+use types::{App, ProcessInfo, Connection, ProcessInfoFormatted};
 use process::refresh_proc_maps;
 use capture::connection_from_packet;
 use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event};
@@ -222,7 +222,13 @@ async fn main() -> Result<(), io::Error> {
         display_startup_info(&iface, true, containers_mode);
         
         if let Some(final_stats) = rx.recv().await {
-            if let Ok(json_output) = serde_json::to_string_pretty(&final_stats) {
+            // Convert to formatted version for JSON output
+            let formatted_stats: std::collections::HashMap<i32, ProcessInfoFormatted> = final_stats
+                .iter()
+                .map(|(pid, info)| (*pid, ProcessInfoFormatted::from(info)))
+                .collect();
+            
+            if let Ok(json_output) = serde_json::to_string_pretty(&formatted_stats) {
                 println!("{}", json_output);
             }
         }
