@@ -26,6 +26,8 @@ struct Cli {
     iface: Option<String>,
     #[arg(long)]
     json: bool,
+    #[arg(long)]
+    containers: bool,
 }
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone, Copy)]
@@ -42,6 +44,7 @@ struct ProcessInfo {
     name: String,
     sent: u64,
     received: u64,
+    container_name: Option<String>,
 }
 
 enum SortColumn {
@@ -49,18 +52,21 @@ enum SortColumn {
     Name,
     Sent,
     Received,
+    Container,
 }
 
 struct App {
     stats: HashMap<i32, ProcessInfo>,
     sort_by: SortColumn,
+    containers_mode: bool,
 }
 
 impl App {
-    fn new() -> Self {
+    fn new(containers_mode: bool) -> Self {
         App {
             stats: HashMap::new(),
             sort_by: SortColumn::Pid,
+            containers_mode,
         }
     }
 
@@ -77,6 +83,9 @@ impl App {
                 sorted.sort_by_key(|(_, info)| info.received);
                 sorted.reverse();
             }
+            SortColumn::Container => {
+                sorted.sort_by_key(|(_, info)| &info.container_name);
+            }
         }
         sorted
     }
@@ -86,9 +95,69 @@ impl App {
 struct ProcessIdentifier {
     pid: i32,
     name: String,
+    container_name: Option<String>,
 }
 
-fn refresh_proc_maps() -> (HashMap<u64, ProcessIdentifier>, HashMap<Connection, u64>) {
+fn extract_container_name(pid: i32) -> Option<String> {
+    // Read /proc/[PID]/cgroup to extract container information
+    let cgroup_path = format!("/proc/{}/cgroup", pid);
+    
+    if let Ok(cgroup_content) = std::fs::read_to_string(&cgroup_path) {
+        for line in cgroup_content.lines() {
+            // Look for Docker containers (typically in the format: 0::/docker/container_id)
+            if line.contains("/docker/") {
+                if let Some(docker_part) = line.split("/docker/").nth(1) {
+                    let container_id = docker_part.trim();
+                    if container_id.len() >= 12 {
+                        return Some(format!("docker:{}", &container_id[..12]));
+                    }
+                }
+            }
+            // Look for systemd Docker containers (format: 0::/system.slice/docker-container_id.scope)
+            else if line.contains("/system.slice/docker-") && line.contains(".scope") {
+                if let Some(docker_part) = line.split("/system.slice/docker-").nth(1) {
+                    if let Some(container_id) = docker_part.split(".scope").next() {
+                        if container_id.len() >= 12 {
+                            return Some(format!("docker:{}", &container_id[..12]));
+                        }
+                    }
+                }
+            }
+            // Look for Podman containers (typically in the format: 0::/machine.slice/libpod-container_id.scope)
+            else if line.contains("/libpod-") && line.contains(".scope") {
+                if let Some(podman_part) = line.split("/libpod-").nth(1) {
+                    if let Some(container_id) = podman_part.split(".scope").next() {
+                        if container_id.len() >= 12 {
+                            return Some(format!("podman:{}", &container_id[..12]));
+                        }
+                    }
+                }
+            }
+            // Look for containerd containers (typically in the format: 0::/system.slice/containerd.service)
+            else if line.contains("/containerd") {
+                return Some("containerd".to_string());
+            }
+            // Look for systemd-nspawn containers
+            else if line.contains("/machine.slice/systemd-nspawn") {
+                if let Some(nspawn_part) = line.split("/systemd-nspawn@").nth(1) {
+                    if let Some(container_name) = nspawn_part.split(".service").next() {
+                        return Some(format!("nspawn:{}", container_name));
+                    }
+                }
+            }
+            // Look for LXC containers
+            else if line.contains("/lxc/") {
+                if let Some(lxc_part) = line.split("/lxc/").nth(1) {
+                    let container_name = lxc_part.split('/').next().unwrap_or(lxc_part);
+                    return Some(format!("lxc:{}", container_name));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn refresh_proc_maps(containers_mode: bool) -> (HashMap<u64, ProcessIdentifier>, HashMap<Connection, u64>) {
     let mut inode_to_pid_map: HashMap<u64, ProcessIdentifier> = HashMap::new();
     let mut connection_to_inode_map: HashMap<Connection, u64> = HashMap::new();
 
@@ -96,11 +165,21 @@ fn refresh_proc_maps() -> (HashMap<u64, ProcessIdentifier>, HashMap<Connection, 
         for proc in all_procs {
             if let Ok(p) = proc {
                 let name = p.stat().map_or_else(|_| "???".to_string(), |s| s.comm);
+                let container_name = if containers_mode {
+                    extract_container_name(p.pid)
+                } else {
+                    None
+                };
+                
                 if let Ok(fds) = p.fd() {
                     for fd in fds {
                         if let Ok(fd_info) = fd {
                             if let procfs::process::FDTarget::Socket(inode) = fd_info.target {
-                                inode_to_pid_map.insert(inode, ProcessIdentifier { pid: p.pid, name: name.clone() });
+                                inode_to_pid_map.insert(inode, ProcessIdentifier { 
+                                    pid: p.pid, 
+                                    name: name.clone(),
+                                    container_name: container_name.clone(),
+                                });
                             }
                         }
                     }
@@ -174,6 +253,7 @@ async fn main() -> Result<(), io::Error> {
         // Spawn a regular thread for packet capture (not async)
         let iface_clone = iface.clone();
         let json_mode = cli.json;
+        let containers_mode = cli.containers;
         thread::spawn(move || {
             let main_device = Device::from(iface_clone.as_str());
             
@@ -202,7 +282,7 @@ async fn main() -> Result<(), io::Error> {
             let mut bandwidth_map: HashMap<i32, ProcessInfo> = HashMap::new();
             let mut last_map_refresh = Instant::now();
             let mut last_send = Instant::now();
-            let (mut inode_map, mut conn_map) = refresh_proc_maps();
+            let (mut inode_map, mut conn_map) = refresh_proc_maps(containers_mode);
             
             let capture_start = Instant::now();
 
@@ -217,7 +297,7 @@ async fn main() -> Result<(), io::Error> {
 
                 // Refresh process maps every 2 seconds
                 if last_map_refresh.elapsed() > Duration::from_secs(2) {
-                    (inode_map, conn_map) = refresh_proc_maps();
+                    (inode_map, conn_map) = refresh_proc_maps(containers_mode);
                     last_map_refresh = Instant::now();
                 }
 
@@ -258,7 +338,8 @@ async fn main() -> Result<(), io::Error> {
                                 let stats = bandwidth_map.entry(proc_identifier.pid).or_insert(ProcessInfo { 
                                     name: proc_identifier.name.clone(),
                                     sent: 0, 
-                                    received: 0 
+                                    received: 0,
+                                    container_name: proc_identifier.container_name.clone(),
                                 });
                                 
                                 // Determine direction based on which connection matched
@@ -304,24 +385,48 @@ async fn main() -> Result<(), io::Error> {
         });
 
         if cli.json {
+            // Display startup information for JSON mode
+            eprintln!("🚀 Starting monitetoring...");
+            eprintln!("📡 Interface: {}", iface);
+            eprintln!("📊 Mode: JSON output");
+            eprintln!("🐳 Container awareness: {}", if cli.containers { "Enabled" } else { "Disabled" });
+            eprintln!("⏱️  Capturing for 5 seconds...");
+            eprintln!();
+            
             if let Some(final_stats) = rx.recv().await {
                 if let Ok(json_output) = serde_json::to_string_pretty(&final_stats) {
                     println!("{}", json_output);
                 }
             }
         } else {
+            // Display startup information for TUI mode
+            eprintln!("🚀 Starting monitetoring...");
+            eprintln!("📡 Interface: {}", iface);
+            eprintln!("📊 Mode: Interactive TUI");
+            eprintln!("🐳 Container awareness: {}", if cli.containers { "Enabled" } else { "Disabled" });
+            eprintln!("⏱️  Preparing to capture network traffic... (Press 'q' to quit)");
+            eprintln!();
+            eprintln!("🎯 Tip: Press 'p' for PID, 'n' for Name, 's' for Sent, 'r' for Received{}", 
+                     if cli.containers { ", 'c' for Container" } else { "" });
+            eprintln!("📊 Sorting: Higher bandwidth usage appears at the top");
+            eprintln!();
+            
+            // Small delay to let user read the information
+            std::thread::sleep(std::time::Duration::from_millis(2000));
+            
             // This will be the UI task
-            let mut app = App::new();
+            let mut app = App::new(cli.containers);
             let mut terminal = setup_terminal()?;
             
             loop {
                 if let Ok(new_stats) = rx.try_recv() {
                     // Accumulate new data instead of replacing
                     for (pid, new_info) in new_stats {
-                        let stats = app.stats.entry(pid).or_insert(ProcessInfo { name: new_info.name.clone(), sent: 0, received: 0 });
+                        let stats = app.stats.entry(pid).or_insert(ProcessInfo { name: new_info.name.clone(), sent: 0, received: 0, container_name: new_info.container_name.clone() });
                         stats.sent = new_info.sent;
                         stats.received = new_info.received;
                         stats.name = new_info.name;
+                        stats.container_name = new_info.container_name;
                     }
                 }
                 
@@ -342,32 +447,63 @@ async fn main() -> Result<(), io::Error> {
                     let title = Block::default().title("Rust-Hogs").borders(Borders::ALL);
                     f.render_widget(title, chunks[0]);
 
-                    let header_cells = ["(P)ID", "Name", "(S)ent", "(R)eceived"]
+                    let header_cells = if app.containers_mode {
+                        vec!["(P)ID", "Name", "(S)ent", "(R)eceived", "(C)ontainer"]
+                    } else {
+                        vec!["(P)ID", "Name", "(S)ent", "(R)eceived"]
+                    };
+                    let header_cells: Vec<_> = header_cells
                         .iter()
-                        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Red)));
+                        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Red)))
+                        .collect();
                     let header = Row::new(header_cells);
 
                     let rows = app.sorted_stats().into_iter().map(|(pid, data)| {
-                        Row::new(vec![
-                            Cell::from(pid.to_string()),
-                            Cell::from(data.name.clone()),
-                            Cell::from(data.sent.to_string()),
-                            Cell::from(data.received.to_string()),
-                        ])
+                        if app.containers_mode {
+                            Row::new(vec![
+                                Cell::from(pid.to_string()),
+                                Cell::from(data.name.clone()),
+                                Cell::from(data.sent.to_string()),
+                                Cell::from(data.received.to_string()),
+                                Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
+                            ])
+                        } else {
+                            Row::new(vec![
+                                Cell::from(pid.to_string()),
+                                Cell::from(data.name.clone()),
+                                Cell::from(data.sent.to_string()),
+                                Cell::from(data.received.to_string()),
+                            ])
+                        }
                     });
 
-                    let widths = [
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                        Constraint::Percentage(25),
-                    ];
+                    let widths = if app.containers_mode {
+                        [
+                            Constraint::Percentage(15),
+                            Constraint::Percentage(25),
+                            Constraint::Percentage(25),
+                            Constraint::Percentage(25),
+                            Constraint::Percentage(10),
+                        ].as_slice()
+                    } else {
+                        [
+                            Constraint::Percentage(25),
+                            Constraint::Percentage(25),
+                            Constraint::Percentage(25),
+                            Constraint::Percentage(25),
+                        ].as_slice()
+                    };
                     let table = Table::new(rows, widths)
                         .header(header)
                         .block(Block::default().borders(Borders::ALL).title("Processes"));
                     f.render_widget(table, chunks[1]);
                     
-                    let footer = Paragraph::new("Press 'q' to quit, 'p'/'n'/'s'/'r' to sort")
+                    let footer_text = if app.containers_mode {
+                        "Press 'q' to quit, 'p'/'n'/'s'/'r'/'c' to sort"
+                    } else {
+                        "Press 'q' to quit, 'p'/'n'/'s'/'r' to sort"
+                    };
+                    let footer = Paragraph::new(footer_text)
                         .block(Block::default().borders(Borders::ALL));
                     f.render_widget(footer, chunks[2]);
                 })?;
@@ -380,6 +516,11 @@ async fn main() -> Result<(), io::Error> {
                             KeyCode::Char('n') => app.sort_by = SortColumn::Name,
                             KeyCode::Char('s') => app.sort_by = SortColumn::Sent,
                             KeyCode::Char('r') => app.sort_by = SortColumn::Received,
+                            KeyCode::Char('c') => {
+                                if app.containers_mode {
+                                    app.sort_by = SortColumn::Container;
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -389,7 +530,14 @@ async fn main() -> Result<(), io::Error> {
             restore_terminal(&mut terminal)?;
         }
     } else {
-        println!("No interface specified. Available interfaces:");
+        eprintln!("❌ No interface specified!");
+        eprintln!();
+        eprintln!("💡 Usage examples:");
+        eprintln!("   sudo monitetoring --iface eth0                    # Monitor eth0 interface");
+        eprintln!("   sudo monitetoring --iface wlan0 --containers      # Monitor with container awareness");
+        eprintln!("   sudo monitetoring --iface any --json              # JSON output from all interfaces");
+        eprintln!();
+        eprintln!("🔌 Available network interfaces:");
         let devices = match Device::list() {
             Ok(d) => d,
             Err(e) => {
@@ -398,8 +546,10 @@ async fn main() -> Result<(), io::Error> {
             }
         };
         for device in devices {
-            println!("- {}", device.name);
+            eprintln!("   - {}", device.name);
         }
+        eprintln!();
+        eprintln!("📖 Use --help for more options");
     }
     Ok(())
 }
