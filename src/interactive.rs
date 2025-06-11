@@ -106,6 +106,7 @@ fn run_full_interactive_setup() -> Result<Option<InteractiveConfig>, io::Error> 
             interface: interface.clone(),
             json_mode,
             containers_mode,
+            alerts: vec![], // Initialize with no alerts
         };
         
         if let Err(e) = save_config(&config) {

@@ -1,5 +1,6 @@
-use serde::Serialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
@@ -37,6 +38,7 @@ pub struct ProcessInfo {
     pub sent_rate: u64,      // bytes per second
     pub received_rate: u64,  // bytes per second
     pub container_name: Option<String>,
+    pub has_alert: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -85,10 +87,25 @@ pub enum SortColumn {
     Container,
 }
 
+pub enum AppMode {
+    Normal,
+    EditingAlert,
+}
+
 pub struct App {
     pub stats: HashMap<i32, ProcessInfo>,
     pub sort_by: SortColumn,
     pub containers_mode: bool,
+    pub alerts: HashMap<i32, Alert>,
+    pub selected_process: Option<i32>,
+    pub show_action_panel: bool,
+    pub selected_action: usize,
+    pub mode: AppMode,
+    pub alert_input: String,
+    pub command_input: String,
+    pub selected_alert_action: usize,
+    pub killed_processes: HashSet<i32>,
+    pub alert_cooldowns: HashMap<i32, Instant>,
 }
 
 impl App {
@@ -97,6 +114,16 @@ impl App {
             stats: HashMap::new(),
             sort_by: SortColumn::Pid,
             containers_mode,
+            alerts: HashMap::new(),
+            selected_process: None,
+            show_action_panel: false,
+            selected_action: 0,
+            mode: AppMode::Normal,
+            alert_input: String::new(),
+            command_input: String::new(),
+            selected_alert_action: 0,
+            killed_processes: HashSet::new(),
+            alert_cooldowns: HashMap::new(),
         }
     }
 
@@ -135,4 +162,17 @@ impl App {
         }
         sorted
     }
-} 
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub enum AlertAction {
+    Kill,
+    CustomCommand(String),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Alert {
+    pub process_pid: i32,
+    pub threshold_bytes: u64,
+    pub action: AlertAction,
+}

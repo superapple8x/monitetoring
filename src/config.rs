@@ -1,4 +1,5 @@
 use clap::Parser;
+use crate::types::Alert;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -21,6 +22,8 @@ pub struct SavedConfig {
     pub interface: String,
     pub json_mode: bool,
     pub containers_mode: bool,
+    #[serde(default)]
+    pub alerts: Vec<Alert>,
 }
 
 pub fn get_config_path() -> Result<PathBuf, io::Error> {

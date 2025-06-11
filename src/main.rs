@@ -7,20 +7,22 @@ mod interactive;
 
 use clap::Parser;
 use pcap::{Device, Capture};
-use std::process::exit;
+use std::process::{exit, Command};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
 use tokio::sync::mpsc;
 use crossterm::event::{self, Event};
 use std::io;
 use std::thread;
+use nix::sys::signal::{self, Signal};
+use nix::unistd::Pid;
 
-use config::{Cli, reset_config};
-use types::{App, ProcessInfo, Connection, ProcessInfoFormatted};
+use config::{Cli, reset_config, load_config};
+use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction};
 use process::refresh_proc_maps;
 use capture::connection_from_packet;
 use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event};
-use interactive::{run_interactive_mode, InteractiveConfig};
+use interactive::run_interactive_mode;
 
 fn display_startup_info(iface: &str, is_json: bool, containers_enabled: bool) {
     eprintln!("🚀 Starting monitetoring...");
@@ -55,7 +57,6 @@ fn show_interface_help() {
         Err(e) => {
             eprintln!("Error listing devices: {}", e);
             exit(1);
-            unreachable!()
         }
     };
     for device in devices {
@@ -63,6 +64,41 @@ fn show_interface_help() {
     }
     eprintln!();
     eprintln!("📖 Use --help for more options");
+}
+
+fn execute_alert_action(action: &AlertAction, pid: i32, name: &str) -> (bool, Option<String>) {
+    match action {
+        AlertAction::Kill => {
+            if let Ok(_) = signal::kill(Pid::from_raw(pid), Signal::SIGKILL) {
+                (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)))
+            } else {
+                (false, Some(format!("❌ Failed to kill {} (PID {})", name, pid)))
+            }
+        }
+        AlertAction::CustomCommand(cmd) => {
+            eprintln!("🔧 Executing custom command for {} (PID {}): {}", name, pid, cmd);
+            
+            let mut command = Command::new("sh");
+            command.arg("-c").arg(cmd)
+                .env("MONITETORING_PID", pid.to_string())
+                .env("MONITETORING_PROCESS_NAME", name)
+                .env("MONITETORING_BANDWIDTH_EXCEEDED", "true");
+            
+            match command.status() {
+                Ok(status) => {
+                    if status.success() {
+                        (false, Some(format!("✅ Custom command executed successfully for {} (PID {})", name, pid)))
+                    } else {
+                        (false, Some(format!("❌ Custom command failed (exit code: {}) for {} (PID {})", 
+                                           status.code().unwrap_or(-1), name, pid)))
+                    }
+                }
+                Err(e) => {
+                    (false, Some(format!("❌ Custom command error for {} (PID {}): {}", name, pid, e)))
+                }
+            }
+        }
+    }
 }
 
 #[tokio::main]
@@ -119,7 +155,6 @@ async fn main() -> Result<(), io::Error> {
             Err(e) => {
                 eprintln!("Error creating capture handle: {}", e);
                 exit(1);
-                unreachable!()
             }
         };
 
@@ -134,7 +169,6 @@ async fn main() -> Result<(), io::Error> {
             Err(e) => {
                 eprintln!("Error opening capture: {}", e);
                 exit(1);
-                unreachable!()
             }
         };
 
@@ -184,11 +218,12 @@ async fn main() -> Result<(), io::Error> {
                         if let Some(proc_identifier) = inode_map.get(&found_inode) {
                             let stats = bandwidth_map.entry(proc_identifier.pid).or_insert(ProcessInfo { 
                                 name: proc_identifier.name.clone(),
-                                sent: 0, 
+                                sent: 0,
                                 received: 0,
                                 sent_rate: 0,
                                 received_rate: 0,
                                 container_name: proc_identifier.container_name.clone(),
+                                has_alert: false, // Default value
                             });
                             
                             // Determine direction based on which connection matched
@@ -262,19 +297,31 @@ async fn main() -> Result<(), io::Error> {
         
         // Start TUI
         let mut app = App::new(containers_mode);
+        if let Some(saved_config) = load_config() {
+            for alert in saved_config.alerts {
+                app.alerts.insert(alert.process_pid, alert);
+            }
+        }
         let mut terminal = setup_terminal()?;
         
         loop {
             if let Ok(new_stats) = rx.try_recv() {
-                // Accumulate new data instead of replacing
+                // Accumulate new data instead of replacing, but filter out killed processes
                 for (pid, new_info) in new_stats {
-                    let stats = app.stats.entry(pid).or_insert(ProcessInfo { 
-                        name: new_info.name.clone(), 
-                        sent: 0, 
+                    // Skip processes that have been killed
+                    if app.killed_processes.contains(&pid) {
+                        continue;
+                    }
+                    
+                    let has_alert = app.alerts.contains_key(&pid);
+                    let stats = app.stats.entry(pid).or_insert(ProcessInfo {
+                        name: new_info.name.clone(),
+                        sent: 0,
                         received: 0,
                         sent_rate: 0,
                         received_rate: 0,
-                        container_name: new_info.container_name.clone() 
+                        container_name: new_info.container_name.clone(),
+                        has_alert,
                     });
                     stats.sent = new_info.sent;
                     stats.received = new_info.received;
@@ -282,7 +329,47 @@ async fn main() -> Result<(), io::Error> {
                     stats.received_rate = new_info.received_rate;
                     stats.name = new_info.name;
                     stats.container_name = new_info.container_name;
+                    stats.has_alert = has_alert;
                 }
+                
+                // Remove killed processes from the stats entirely
+                app.stats.retain(|pid, _| !app.killed_processes.contains(pid));
+            }
+
+            // Check for triggered alerts (with cooldown)
+            let mut processes_to_kill = Vec::new();
+            let now = Instant::now();
+            const COOLDOWN_DURATION: Duration = Duration::from_secs(60); // 1 minute cooldown
+            
+            for (pid, alert) in &app.alerts {
+                if let Some(stats) = app.stats.get(pid) {
+                    if stats.sent + stats.received > alert.threshold_bytes {
+                        // Check if alert is in cooldown
+                        let should_trigger = match app.alert_cooldowns.get(pid) {
+                            Some(last_trigger) => now.duration_since(*last_trigger) >= COOLDOWN_DURATION,
+                            None => true, // First time triggering
+                        };
+                        
+                        if should_trigger {
+                            let (was_killed, message) = execute_alert_action(&alert.action, *pid, &stats.name);
+                            if was_killed {
+                                processes_to_kill.push(*pid);
+                            }
+                            // Show message in stderr so user can see what happened
+                            if let Some(msg) = message {
+                                eprintln!("{}", msg);
+                            }
+                            // Set cooldown
+                            app.alert_cooldowns.insert(*pid, now);
+                        }
+                    }
+                }
+            }
+            
+            // Mark killed processes and remove their cooldowns
+            for pid in processes_to_kill {
+                app.killed_processes.insert(pid);
+                app.alert_cooldowns.remove(&pid);
             }
             
             render_ui(&app, &mut terminal)?;
