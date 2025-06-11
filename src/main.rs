@@ -15,14 +15,12 @@ use crossterm::event::{self, Event};
 use std::io;
 use std::thread;
 
-use config::Cli;
+use config::{Cli, reset_config};
 use types::{App, ProcessInfo, Connection};
 use process::refresh_proc_maps;
 use capture::connection_from_packet;
 use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event};
 use interactive::{run_interactive_mode, InteractiveConfig};
-
-
 
 fn display_startup_info(iface: &str, is_json: bool, containers_enabled: bool) {
     eprintln!("🚀 Starting monitetoring...");
@@ -49,6 +47,7 @@ fn show_interface_help() {
     eprintln!("   sudo monitetoring --iface eth0                    # Monitor eth0 interface");
     eprintln!("   sudo monitetoring --iface wlan0 --containers      # Monitor with container awareness");
     eprintln!("   sudo monitetoring --iface any --json              # JSON output from all interfaces");
+    eprintln!("   sudo monitetoring --reset                         # Reset saved configuration");
     eprintln!();
     eprintln!("🔌 Available network interfaces:");
     let devices = match Device::list() {
@@ -69,6 +68,24 @@ fn show_interface_help() {
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
     let cli = Cli::parse();
+
+    // Handle reset flag first
+    if cli.reset {
+        match reset_config() {
+            Ok(true) => {
+                println!("✅ Saved configuration has been reset.");
+                println!("   Next time you run the program, you'll see the full setup again.");
+            }
+            Ok(false) => {
+                println!("ℹ️  No saved configuration found to reset.");
+            }
+            Err(e) => {
+                eprintln!("❌ Error resetting configuration: {}", e);
+                exit(1);
+            }
+        }
+        return Ok(());
+    }
 
     // Check if no arguments were provided - run interactive mode
     let (iface, json_mode, containers_mode) = if cli.iface.is_none() && !cli.json && !cli.containers {
