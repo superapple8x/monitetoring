@@ -139,8 +139,10 @@ async fn main() -> Result<(), io::Error> {
         };
 
         let mut bandwidth_map: HashMap<i32, ProcessInfo> = HashMap::new();
+        let mut previous_bandwidth_map: HashMap<i32, ProcessInfo> = HashMap::new();
         let mut last_map_refresh = Instant::now();
         let mut last_send = Instant::now();
+        let mut last_rate_calc = Instant::now();
         let (mut inode_map, mut conn_map) = refresh_proc_maps(containers_mode);
         
         let capture_start = Instant::now();
@@ -184,24 +186,18 @@ async fn main() -> Result<(), io::Error> {
                                 name: proc_identifier.name.clone(),
                                 sent: 0, 
                                 received: 0,
+                                sent_rate: 0,
+                                received_rate: 0,
                                 container_name: proc_identifier.container_name.clone(),
                             });
                             
                             // Determine direction based on which connection matched
-                            if matched_conn.source_ip == conn.source_ip {
-                                // Original direction
-                                if conn.source_ip.is_loopback() || conn.source_ip.is_multicast() {
-                                    stats.sent += packet.data.len() as u64;
-                                } else {
-                                    stats.received += packet.data.len() as u64;
-                                }
+                            if matched_conn == conn {
+                                // Original packet direction: process is sending data (outbound)
+                                stats.sent += packet.data.len() as u64;
                             } else {
-                                // Reverse direction
-                                if conn.dest_ip.is_loopback() || conn.dest_ip.is_multicast() {
-                                    stats.sent += packet.data.len() as u64;
-                                } else {
-                                    stats.received += packet.data.len() as u64;
-                                }
+                                // Reverse connection matched: process is receiving data (inbound)  
+                                stats.received += packet.data.len() as u64;
                             }
                         }
                     }
@@ -209,6 +205,32 @@ async fn main() -> Result<(), io::Error> {
                 Err(_) => {
                     // Timeout or other error, continue
                 }
+            }
+
+            // Calculate rates every second
+            if last_rate_calc.elapsed() > Duration::from_secs(1) {
+                let rate_interval = last_rate_calc.elapsed().as_secs_f64();
+                
+                for (pid, current_stats) in bandwidth_map.iter_mut() {
+                    if let Some(prev_stats) = previous_bandwidth_map.get(pid) {
+                        let sent_diff = current_stats.sent.saturating_sub(prev_stats.sent);
+                        let received_diff = current_stats.received.saturating_sub(prev_stats.received);
+                        
+                        current_stats.sent_rate = (sent_diff as f64 / rate_interval) as u64;
+                        current_stats.received_rate = (received_diff as f64 / rate_interval) as u64;
+                    } else {
+                        // First measurement, rate is total divided by time since start
+                        let elapsed = capture_start.elapsed().as_secs_f64();
+                        if elapsed > 0.0 {
+                            current_stats.sent_rate = (current_stats.sent as f64 / elapsed) as u64;
+                            current_stats.received_rate = (current_stats.received as f64 / elapsed) as u64;
+                        }
+                    }
+                }
+                
+                // Store current state for next rate calculation
+                previous_bandwidth_map = bandwidth_map.clone();
+                last_rate_calc = Instant::now();
             }
 
             if !json_mode && last_send.elapsed() > Duration::from_secs(1) {
@@ -249,11 +271,15 @@ async fn main() -> Result<(), io::Error> {
                     let stats = app.stats.entry(pid).or_insert(ProcessInfo { 
                         name: new_info.name.clone(), 
                         sent: 0, 
-                        received: 0, 
+                        received: 0,
+                        sent_rate: 0,
+                        received_rate: 0,
                         container_name: new_info.container_name.clone() 
                     });
                     stats.sent = new_info.sent;
                     stats.received = new_info.received;
+                    stats.sent_rate = new_info.sent_rate;
+                    stats.received_rate = new_info.received_rate;
                     stats.name = new_info.name;
                     stats.container_name = new_info.container_name;
                 }

@@ -70,9 +70,9 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
         f.render_widget(title, chunks[0]);
 
         let header_cells = if app.containers_mode {
-            vec!["(P)ID", "Name", "(S)ent", "(R)eceived", "(C)ontainer"]
+            vec!["(P)ID", "Name", "(S)ent Total", "Sent/s", "(R)eceived Total", "Recv/s", "(C)ontainer"]
         } else {
-            vec!["(P)ID", "Name", "(S)ent", "(R)eceived"]
+            vec!["(P)ID", "Name", "(S)ent Total", "Sent/s", "(R)eceived Total", "Recv/s"]
         };
         let header_cells: Vec<_> = header_cells
             .iter()
@@ -86,7 +86,9 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
                     Cell::from(format_bytes(data.sent)),
+                    Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
                     Cell::from(format_bytes(data.received)),
+                    Cell::from(format!("{}/s", format_bytes(data.received_rate))),
                     Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
                 ])
             } else {
@@ -94,25 +96,31 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
                     Cell::from(format_bytes(data.sent)),
+                    Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
                     Cell::from(format_bytes(data.received)),
+                    Cell::from(format!("{}/s", format_bytes(data.received_rate))),
                 ])
             }
         });
 
         let widths = if app.containers_mode {
             [
-                Constraint::Percentage(15),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(10),
+                Constraint::Percentage(10),  // PID
+                Constraint::Percentage(20),  // Name
+                Constraint::Percentage(15),  // Sent Total
+                Constraint::Percentage(15),  // Sent Rate
+                Constraint::Percentage(15),  // Received Total
+                Constraint::Percentage(15),  // Received Rate
+                Constraint::Percentage(10),  // Container
             ].as_slice()
         } else {
             [
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
-                Constraint::Percentage(25),
+                Constraint::Percentage(15),  // PID
+                Constraint::Percentage(25),  // Name
+                Constraint::Percentage(20),  // Sent Total
+                Constraint::Percentage(20),  // Sent Rate
+                Constraint::Percentage(20),  // Received Total
+                Constraint::Percentage(20),  // Received Rate
             ].as_slice()
         };
         let table = Table::new(rows, widths)

@@ -34,6 +34,8 @@ pub struct ProcessInfo {
     pub name: String,
     pub sent: u64,
     pub received: u64,
+    pub sent_rate: u64,      // bytes per second
+    pub received_rate: u64,  // bytes per second
     pub container_name: Option<String>,
 }
 
@@ -42,8 +44,12 @@ pub struct ProcessInfoFormatted {
     pub name: String,
     pub sent_bytes: u64,
     pub sent_formatted: String,
+    pub sent_rate_bytes: u64,
+    pub sent_rate_formatted: String,
     pub received_bytes: u64,
     pub received_formatted: String,
+    pub received_rate_bytes: u64,
+    pub received_rate_formatted: String,
     pub container_name: Option<String>,
 }
 
@@ -53,8 +59,12 @@ impl From<&ProcessInfo> for ProcessInfoFormatted {
             name: info.name.clone(),
             sent_bytes: info.sent,
             sent_formatted: format_bytes(info.sent),
+            sent_rate_bytes: info.sent_rate,
+            sent_rate_formatted: format!("{}/s", format_bytes(info.sent_rate)),
             received_bytes: info.received,
             received_formatted: format_bytes(info.received),
+            received_rate_bytes: info.received_rate,
+            received_rate_formatted: format!("{}/s", format_bytes(info.received_rate)),
             container_name: info.container_name.clone(),
         }
     }
