@@ -60,19 +60,20 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
                 [
                     Constraint::Length(3), // Title
                     Constraint::Min(0),    // Table
+                    Constraint::Length(3), // Totals section
                     Constraint::Length(3), // Footer
                 ]
                 .as_ref(),
             )
             .split(f.size());
 
-        let title = Block::default().title("Rust-Hogs").borders(Borders::ALL);
+        let title = Block::default().title("Monitetoring").borders(Borders::ALL);
         f.render_widget(title, chunks[0]);
 
         let header_cells = if app.containers_mode {
-            vec!["(P)ID", "Name", "(S)ent Total", "Sent/s", "(R)eceived Total", "Recv/s", "(C)ontainer"]
+            vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total", "(C)ontainer"]
         } else {
-            vec!["(P)ID", "Name", "(S)ent Total", "Sent/s", "(R)eceived Total", "Recv/s"]
+            vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total"]
         };
         let header_cells: Vec<_> = header_cells
             .iter()
@@ -85,20 +86,20 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
                 Row::new(vec![
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
-                    Cell::from(format_bytes(data.sent)),
                     Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
-                    Cell::from(format_bytes(data.received)),
+                    Cell::from(format_bytes(data.sent)),
                     Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                    Cell::from(format_bytes(data.received)),
                     Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
                 ])
             } else {
                 Row::new(vec![
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
-                    Cell::from(format_bytes(data.sent)),
                     Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
-                    Cell::from(format_bytes(data.received)),
+                    Cell::from(format_bytes(data.sent)),
                     Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                    Cell::from(format_bytes(data.received)),
                 ])
             }
         });
@@ -107,26 +108,39 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
             [
                 Constraint::Percentage(10),  // PID
                 Constraint::Percentage(20),  // Name
-                Constraint::Percentage(15),  // Sent Total
                 Constraint::Percentage(15),  // Sent Rate
-                Constraint::Percentage(15),  // Received Total
+                Constraint::Percentage(15),  // Sent Total
                 Constraint::Percentage(15),  // Received Rate
+                Constraint::Percentage(15),  // Received Total
                 Constraint::Percentage(10),  // Container
             ].as_slice()
         } else {
             [
                 Constraint::Percentage(15),  // PID
                 Constraint::Percentage(25),  // Name
-                Constraint::Percentage(20),  // Sent Total
                 Constraint::Percentage(20),  // Sent Rate
-                Constraint::Percentage(20),  // Received Total
+                Constraint::Percentage(20),  // Sent Total
                 Constraint::Percentage(20),  // Received Rate
+                Constraint::Percentage(20),  // Received Total
             ].as_slice()
         };
         let table = Table::new(rows, widths)
             .header(header)
             .block(Block::default().borders(Borders::ALL).title("Processes"));
         f.render_widget(table, chunks[1]);
+        
+        // Render totals section
+        let (total_sent, total_received, total_sent_rate, total_received_rate) = app.totals();
+        let totals_text = format!(
+            "📊 TOTALS: Sent {}/s ({} total) | Received {}/s ({} total)", 
+            format_bytes(total_sent_rate),
+            format_bytes(total_sent),
+            format_bytes(total_received_rate),
+            format_bytes(total_received)
+        );
+        let totals = Paragraph::new(totals_text)
+            .block(Block::default().borders(Borders::ALL).title("Network Totals"));
+        f.render_widget(totals, chunks[2]);
         
         let footer_text = if app.containers_mode {
             "Press 'q' to quit, 'p'/'n'/'s'/'r'/'c' to sort"
@@ -135,7 +149,7 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
         };
         let footer = Paragraph::new(footer_text)
             .block(Block::default().borders(Borders::ALL));
-        f.render_widget(footer, chunks[2]);
+        f.render_widget(footer, chunks[3]);
     })?;
     Ok(())
 }

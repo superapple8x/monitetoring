@@ -100,6 +100,22 @@ impl App {
         }
     }
 
+    pub fn totals(&self) -> (u64, u64, u64, u64) {
+        let mut total_sent = 0u64;
+        let mut total_received = 0u64;
+        let mut total_sent_rate = 0u64;
+        let mut total_received_rate = 0u64;
+        
+        for info in self.stats.values() {
+            total_sent += info.sent;
+            total_received += info.received;
+            total_sent_rate += info.sent_rate;
+            total_received_rate += info.received_rate;
+        }
+        
+        (total_sent, total_received, total_sent_rate, total_received_rate)
+    }
+
     pub fn sorted_stats(&self) -> Vec<(&i32, &ProcessInfo)> {
         let mut sorted: Vec<_> = self.stats.iter().collect();
         match self.sort_by {
