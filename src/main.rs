@@ -3,6 +3,7 @@ mod config;
 mod process;
 mod capture;
 mod ui;
+mod interactive;
 
 use clap::Parser;
 use pcap::{Device, Capture};
@@ -19,6 +20,7 @@ use types::{App, ProcessInfo, Connection};
 use process::refresh_proc_maps;
 use capture::connection_from_packet;
 use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event};
+use interactive::{run_interactive_mode, InteractiveConfig};
 
 
 
@@ -68,171 +70,186 @@ fn show_interface_help() {
 async fn main() -> Result<(), io::Error> {
     let cli = Cli::parse();
 
-    if let Some(iface) = cli.iface {
-        let (tx, mut rx) = mpsc::channel(100);
+    // Check if no arguments were provided - run interactive mode
+    let (iface, json_mode, containers_mode) = if cli.iface.is_none() && !cli.json && !cli.containers {
+        // No arguments provided, run interactive mode
+        match run_interactive_mode()? {
+            Some(config) => (config.interface, config.json_mode, config.containers_mode),
+            None => {
+                // User cancelled or quit
+                return Ok(());
+            }
+        }
+    } else if let Some(iface) = cli.iface {
+        // Arguments provided, use them
+        (iface, cli.json, cli.containers)
+    } else {
+        // Some arguments provided but no interface - show help
+        show_interface_help();
+        return Ok(());
+    };
 
-        // Spawn packet capture thread
-        let iface_clone = iface.clone();
-        let json_mode = cli.json;
-        let containers_mode = cli.containers;
-        thread::spawn(move || {
-            let main_device = Device::from(iface_clone.as_str());
-            
-            let cap = match Capture::from_device(main_device) {
-                Ok(cap) => cap,
-                Err(e) => {
-                    eprintln!("Error creating capture handle: {}", e);
-                    exit(1);
-                    unreachable!()
-                }
-            };
+    // Now proceed with the monitoring logic using the determined configuration
+    let (tx, mut rx) = mpsc::channel(100);
 
-            let cap = if iface_clone != "any" {
-                cap.promisc(true)
-            } else {
-                cap
-            };
+    // Spawn packet capture thread
+    let iface_clone = iface.clone();
+    thread::spawn(move || {
+        let main_device = Device::from(iface_clone.as_str());
+        
+        let cap = match Capture::from_device(main_device) {
+            Ok(cap) => cap,
+            Err(e) => {
+                eprintln!("Error creating capture handle: {}", e);
+                exit(1);
+                unreachable!()
+            }
+        };
 
-            let mut cap = match cap.timeout(10).open() {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Error opening capture: {}", e);
-                    exit(1);
-                    unreachable!()
-                }
-            };
+        let cap = if iface_clone != "any" {
+            cap.promisc(true)
+        } else {
+            cap
+        };
 
-            let mut bandwidth_map: HashMap<i32, ProcessInfo> = HashMap::new();
-            let mut last_map_refresh = Instant::now();
-            let mut last_send = Instant::now();
-            let (mut inode_map, mut conn_map) = refresh_proc_maps(containers_mode);
-            
-            let capture_start = Instant::now();
+        let mut cap = match cap.timeout(10).open() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error opening capture: {}", e);
+                exit(1);
+                unreachable!()
+            }
+        };
 
-            loop {
-                // In JSON mode, run for a limited time (e.g., 5 seconds) then exit thread
-                if json_mode && capture_start.elapsed() > Duration::from_secs(5) {
-                    let _ = tx.blocking_send(bandwidth_map.clone());
-                    break;
-                }
+        let mut bandwidth_map: HashMap<i32, ProcessInfo> = HashMap::new();
+        let mut last_map_refresh = Instant::now();
+        let mut last_send = Instant::now();
+        let (mut inode_map, mut conn_map) = refresh_proc_maps(containers_mode);
+        
+        let capture_start = Instant::now();
 
-                // Refresh process maps every 2 seconds
-                if last_map_refresh.elapsed() > Duration::from_secs(2) {
-                    (inode_map, conn_map) = refresh_proc_maps(containers_mode);
-                    last_map_refresh = Instant::now();
-                }
+        loop {
+            // In JSON mode, run for a limited time (e.g., 5 seconds) then exit thread
+            if json_mode && capture_start.elapsed() > Duration::from_secs(5) {
+                let _ = tx.blocking_send(bandwidth_map.clone());
+                break;
+            }
 
-                // Try to get a packet (with timeout)
-                match cap.next_packet() {
-                    Ok(packet) => {
-                        if let Some(conn) = connection_from_packet(packet.data) {
-                            // Check both directions of the connection
-                            let reverse_conn = Connection {
-                                source_port: conn.dest_port,
-                                dest_port: conn.source_port,
-                                source_ip: conn.dest_ip,
-                                dest_ip: conn.source_ip,
-                                protocol: conn.protocol,
-                            };
+            // Refresh process maps every 2 seconds
+            if last_map_refresh.elapsed() > Duration::from_secs(2) {
+                (inode_map, conn_map) = refresh_proc_maps(containers_mode);
+                last_map_refresh = Instant::now();
+            }
+
+            // Try to get a packet (with timeout)
+            match cap.next_packet() {
+                Ok(packet) => {
+                    if let Some(conn) = connection_from_packet(packet.data) {
+                        // Check both directions of the connection
+                        let reverse_conn = Connection {
+                            source_port: conn.dest_port,
+                            dest_port: conn.source_port,
+                            source_ip: conn.dest_ip,
+                            dest_ip: conn.source_ip,
+                            protocol: conn.protocol,
+                        };
+                        
+                        let (matched_conn, found_inode) = if let Some(inode) = conn_map.get(&conn) {
+                            (conn, *inode)
+                        } else if let Some(inode) = conn_map.get(&reverse_conn) {
+                            (reverse_conn, *inode)
+                        } else {
+                            continue;
+                        };
+                        
+                        if let Some(proc_identifier) = inode_map.get(&found_inode) {
+                            let stats = bandwidth_map.entry(proc_identifier.pid).or_insert(ProcessInfo { 
+                                name: proc_identifier.name.clone(),
+                                sent: 0, 
+                                received: 0,
+                                container_name: proc_identifier.container_name.clone(),
+                            });
                             
-                            let (matched_conn, found_inode) = if let Some(inode) = conn_map.get(&conn) {
-                                (conn, *inode)
-                            } else if let Some(inode) = conn_map.get(&reverse_conn) {
-                                (reverse_conn, *inode)
-                            } else {
-                                continue;
-                            };
-                            
-                            if let Some(proc_identifier) = inode_map.get(&found_inode) {
-                                let stats = bandwidth_map.entry(proc_identifier.pid).or_insert(ProcessInfo { 
-                                    name: proc_identifier.name.clone(),
-                                    sent: 0, 
-                                    received: 0,
-                                    container_name: proc_identifier.container_name.clone(),
-                                });
-                                
-                                // Determine direction based on which connection matched
-                                if matched_conn.source_ip == conn.source_ip {
-                                    // Original direction
-                                    if conn.source_ip.is_loopback() || conn.source_ip.is_multicast() {
-                                        stats.sent += packet.data.len() as u64;
-                                    } else {
-                                        stats.received += packet.data.len() as u64;
-                                    }
+                            // Determine direction based on which connection matched
+                            if matched_conn.source_ip == conn.source_ip {
+                                // Original direction
+                                if conn.source_ip.is_loopback() || conn.source_ip.is_multicast() {
+                                    stats.sent += packet.data.len() as u64;
                                 } else {
-                                    // Reverse direction
-                                    if conn.dest_ip.is_loopback() || conn.dest_ip.is_multicast() {
-                                        stats.sent += packet.data.len() as u64;
-                                    } else {
-                                        stats.received += packet.data.len() as u64;
-                                    }
+                                    stats.received += packet.data.len() as u64;
+                                }
+                            } else {
+                                // Reverse direction
+                                if conn.dest_ip.is_loopback() || conn.dest_ip.is_multicast() {
+                                    stats.sent += packet.data.len() as u64;
+                                } else {
+                                    stats.received += packet.data.len() as u64;
                                 }
                             }
                         }
                     }
-                    Err(_) => {
-                        // Timeout or other error, continue
-                    }
                 }
-
-                if !json_mode && last_send.elapsed() > Duration::from_secs(1) {
-                    let _ = tx.blocking_send(bandwidth_map.clone());
-                    last_send = Instant::now();
+                Err(_) => {
+                    // Timeout or other error, continue
                 }
             }
-        });
 
-        if cli.json {
-            display_startup_info(&iface, true, cli.containers);
-            
-            if let Some(final_stats) = rx.recv().await {
-                if let Ok(json_output) = serde_json::to_string_pretty(&final_stats) {
-                    println!("{}", json_output);
-                }
+            if !json_mode && last_send.elapsed() > Duration::from_secs(1) {
+                let _ = tx.blocking_send(bandwidth_map.clone());
+                last_send = Instant::now();
             }
-        } else {
-            display_startup_info(&iface, false, cli.containers);
-            
-            // Small delay to let user read the information
-            std::thread::sleep(std::time::Duration::from_millis(2000));
-            
-            // Start TUI
-            let mut app = App::new(cli.containers);
-            let mut terminal = setup_terminal()?;
-            
-            loop {
-                if let Ok(new_stats) = rx.try_recv() {
-                    // Accumulate new data instead of replacing
-                    for (pid, new_info) in new_stats {
-                        let stats = app.stats.entry(pid).or_insert(ProcessInfo { 
-                            name: new_info.name.clone(), 
-                            sent: 0, 
-                            received: 0, 
-                            container_name: new_info.container_name.clone() 
-                        });
-                        stats.sent = new_info.sent;
-                        stats.received = new_info.received;
-                        stats.name = new_info.name;
-                        stats.container_name = new_info.container_name;
-                    }
-                }
-                
-                render_ui(&app, &mut terminal)?;
+        }
+    });
 
-                if event::poll(Duration::from_millis(100))? {
-                    if let Event::Key(key) = event::read()? {
-                        if handle_key_event(&mut app, key.code) {
-                            break; // User pressed 'q'
-                        }
-                    }
-                }
+    if json_mode {
+        display_startup_info(&iface, true, containers_mode);
+        
+        if let Some(final_stats) = rx.recv().await {
+            if let Ok(json_output) = serde_json::to_string_pretty(&final_stats) {
+                println!("{}", json_output);
             }
-            
-            restore_terminal(&mut terminal)?;
         }
     } else {
-        show_interface_help();
+        display_startup_info(&iface, false, containers_mode);
+        
+        // Small delay to let user read the information
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+        
+        // Start TUI
+        let mut app = App::new(containers_mode);
+        let mut terminal = setup_terminal()?;
+        
+        loop {
+            if let Ok(new_stats) = rx.try_recv() {
+                // Accumulate new data instead of replacing
+                for (pid, new_info) in new_stats {
+                    let stats = app.stats.entry(pid).or_insert(ProcessInfo { 
+                        name: new_info.name.clone(), 
+                        sent: 0, 
+                        received: 0, 
+                        container_name: new_info.container_name.clone() 
+                    });
+                    stats.sent = new_info.sent;
+                    stats.received = new_info.received;
+                    stats.name = new_info.name;
+                    stats.container_name = new_info.container_name;
+                }
+            }
+            
+            render_ui(&app, &mut terminal)?;
+
+            if event::poll(Duration::from_millis(100))? {
+                if let Event::Key(key) = event::read()? {
+                    if handle_key_event(&mut app, key.code) {
+                        break; // User pressed 'q'
+                    }
+                }
+            }
+        }
+        
+        restore_terminal(&mut terminal)?;
     }
+
     Ok(())
 }
 
