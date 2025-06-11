@@ -1,20 +1,24 @@
 # Monitetoring
 
-A real-time per-process network bandwidth monitoring tool for Linux, inspired by `nethogs`. Built with Rust and featuring a beautiful terminal UI powered by `ratatui`.
+A real-time per-process network bandwidth monitoring tool for Linux, inspired by `nethogs`. Built with Rust and featuring a terminal UI powered by `ratatui`.
 
-## 🚀 Features
+## Features
 
-- **Real-time monitoring**: Track network bandwidth usage per process in real-time
-- **Container awareness**: Detect and display containerized processes (Docker, Podman, LXC, containerd, systemd-nspawn)
-- **Interactive setup**: Guided configuration when no arguments provided
-- **Persistent configuration**: Save your preferences and quick-start on subsequent runs
-- **Multiple output formats**: Beautiful TUI interface or JSON output for scripting
-- **Intelligent sorting**: Sort by PID, process name, sent/received bytes, or container name
-- **Human-readable metrics**: Automatic formatting of bandwidth (B, KB, MB, GB, TB)
-- **Network interface selection**: Monitor specific interfaces or all available ones
-- **Zero configuration**: Works out of the box with sensible defaults
+- Real-time monitoring of network bandwidth usage per process
+- Container awareness for Docker, Podman, LXC, containerd, and systemd-nspawn
+- Interactive setup when run without arguments
+- Configuration persistence between runs
+- TUI interface or JSON output for scripting
+- Sortable columns (PID, process name, sent/received bytes, container name)
+- Human-readable bandwidth formatting (B, KB, MB, GB, TB)
+- Network interface selection
+- Works without configuration
 
-## 📦 Installation
+## UI
+
+![Monitetoring TUI Interface](doc/image.png)
+
+## Installation
 
 ### Prerequisites
 
@@ -29,14 +33,6 @@ git clone https://github.com/superapple8x/monitetoring
 cd monitetoring
 cargo build --release
 sudo cp target/release/monitetoring /usr/local/bin/
-```
-
-### Using Cargo Install
-
-If the project is published to crates.io:
-
-```bash
-cargo install monitetoring
 ```
 
 ### Manual Installation
@@ -66,9 +62,9 @@ The project uses these key dependencies:
 - `procfs` - Process information
 - `serde` - JSON serialization
 
-## 🎯 Quick Start
+## Quick Start
 
-### Interactive Mode (Recommended)
+### Interactive Mode
 
 Simply run without arguments for guided setup:
 
@@ -102,7 +98,7 @@ sudo monitetoring --interface eth0 --containers
 sudo monitetoring --reset
 ```
 
-## 📋 Command Line Options
+## Command Line Options
 
 ```
 Usage: monitetoring [OPTIONS]
@@ -116,14 +112,14 @@ Options:
   -V, --version                Print version
 ```
 
-## 🖥️ Terminal UI
+## Terminal UI
 
 The TUI interface provides:
 
-- **Real-time updates**: Process bandwidth usage updates every second
-- **Sortable columns**: Press keys to sort by different criteria
-- **Container information**: When enabled, shows container names
-- **Formatted metrics**: Human-readable bandwidth display
+- Process bandwidth usage updates every second
+- Sortable columns via keyboard shortcuts
+- Container information when enabled
+- Human-readable bandwidth display
 
 ### Keyboard Controls
 
@@ -138,9 +134,9 @@ The TUI interface provides:
 
 
 
-## 📊 JSON Output Mode
+## JSON Output Mode
 
-Perfect for integration with monitoring systems or custom scripts:
+For integration with monitoring systems or scripts:
 
 ```bash
 # From source (development)
@@ -173,21 +169,21 @@ sudo monitetoring --interface eth0 --json --containers
 ]
 ```
 
-## 🐳 Container Support
+## Container Support
 
-Monitetoring can detect processes running in various container runtimes:
+Monitetoring can detect processes running in container runtimes:
 
-- **Docker**: Full container name detection
-- **Podman**: Container identification support  
-- **LXC**: Linux Containers support
-- **containerd**: Container runtime support
-- **systemd-nspawn**: Systemd containers
+- Docker
+- Podman
+- LXC
+- containerd
+- systemd-nspawn
 
 Container detection reads `/proc/[PID]/cgroup` to identify container membership.
 
 **Note**: Due to Docker's network namespace isolation, containerized processes may not show network traffic in the host's monitoring view. This is expected behavior - containers use separate network namespaces.
 
-## ⚙️ Configuration
+## Configuration
 
 Monitetoring automatically saves your preferences to:
 - Linux: `~/.config/monitetoring/config.json`
@@ -206,32 +202,24 @@ sudo cargo run -- --reset
 sudo monitetoring --reset
 ```
 
-## 🔧 Technical Details
+## Technical Details
 
 ### Architecture
 
-- **Hybrid async/threaded design**: Dedicated packet capture thread with async UI
-- **Modular structure**: Clean separation between capture, processing, and display
-- **Memory efficient**: Minimal memory footprint with efficient data structures
-- **Cross-platform ready**: Linux-focused but architecturally portable
+- Hybrid async/threaded design with dedicated packet capture thread
+- Modular structure separating capture, processing, and display
+- Linux-focused implementation
 
 ### Network Monitoring
 
-- Uses `libpcap` for efficient packet capture
+- Uses `libpcap` for packet capture
 - Parses TCP/UDP packets to extract process information
 - Maps network sockets to processes via `/proc/net/{tcp,udp}`
 - Tracks per-process bandwidth in real-time
 
-### Performance
+## Contributing
 
-- Minimal CPU overhead
-- Efficient packet filtering
-- Optimized data structures for real-time updates
-- Async UI prevents blocking during heavy network traffic
-
-## 🤝 Contributing
-
-Contributions are welcome! Areas for improvement:
+Contributions are welcome. Areas for improvement:
 
 - Additional container runtime support
 - Windows/macOS compatibility
@@ -239,17 +227,17 @@ Contributions are welcome! Areas for improvement:
 - Additional output formats
 - Enhanced filtering options
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
-- Inspired by the excellent `nethogs` tool
-- Built with the amazing Rust ecosystem
-- UI powered by the fantastic `ratatui` library
+- Inspired by `nethogs`
+- Built with Rust
+- UI powered by `ratatui`
 
-## 🐛 Issues & Support
+## Issues & Support
 
 If you encounter any issues:
 
