@@ -22,7 +22,7 @@ use config::{Cli, reset_config, load_config};
 use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction};
 use process::refresh_proc_maps;
 use capture::connection_from_packet;
-use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event};
+use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event, update_chart_datasets};
 use interactive::run_interactive_mode;
 
 fn display_startup_info(iface: &str, is_json: bool, containers_enabled: bool) {
@@ -376,6 +376,18 @@ async fn main() -> Result<(), io::Error> {
                     let cutoff = now - 600.0; // 600s = 10 min
                     stats.sent_history.retain(|(t, _)| *t >= cutoff);
                     stats.received_history.retain(|(t, _)| *t >= cutoff);
+
+                    // Update system-wide bandwidth history
+                    let current_system_snapshot: Vec<(i32, f64, f64)> = app.stats.iter()
+                        .map(|(pid, info)| (*pid, info.sent_rate as f64, info.received_rate as f64))
+                        .collect();
+                    app.system_bandwidth_history.push((now, current_system_snapshot));
+                    
+                    // Retain only last 10 minutes of system history
+                    app.system_bandwidth_history.retain(|(t, _)| *t >= cutoff);
+
+                    // Update chart datasets for stacked view
+                    update_chart_datasets(&mut app);
                 }
                 
                 // Remove killed processes from the stats entirely

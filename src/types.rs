@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
+use ratatui::style::Color;
 
 fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
@@ -106,6 +107,19 @@ pub enum EditingField {
     Command,
 }
 
+#[derive(PartialEq)]
+pub enum MetricsMode {
+    Combined,    // Send + Receive (current behavior)
+    SendOnly,    // Only sent bandwidth
+    ReceiveOnly, // Only received bandwidth
+}
+
+#[derive(PartialEq)]
+pub enum ChartType {
+    ProcessLines,    // Line chart for individual process
+    SystemStacked,   // Stacked area chart for all processes
+}
+
 pub struct App {
     pub start_time: Instant,
     pub stats: HashMap<i32, ProcessInfo>,
@@ -125,6 +139,11 @@ pub struct App {
     pub alert_cooldowns: HashMap<i32, Instant>,
     pub last_alert_message: Option<String>,
     pub bandwidth_mode: bool,
+    pub system_bandwidth_history: Vec<(f64, Vec<(i32, f64, f64)>)>, // (timestamp, [(pid, sent_rate, received_rate)])
+    pub chart_type: ChartType,
+    pub chart_datasets: Vec<(String, Vec<(f64, f64)>, ratatui::style::Color)>,
+    pub process_colors: HashMap<String, Color>,
+    pub metrics_mode: MetricsMode,
 }
 
 impl App {
@@ -148,6 +167,11 @@ impl App {
             alert_cooldowns: HashMap::new(),
             last_alert_message: None,
             bandwidth_mode: false,
+            system_bandwidth_history: Vec::new(),
+            chart_type: ChartType::ProcessLines,
+            chart_datasets: Vec::new(),
+            process_colors: HashMap::new(),
+            metrics_mode: MetricsMode::Combined,
         }
     }
 
