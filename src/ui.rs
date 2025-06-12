@@ -5,14 +5,15 @@ use ratatui::{
     layout::{Layout, Constraint, Direction},
     style::{Style, Color, Modifier},
     text::{Line, Span, Text},
-    Terminal
+    Terminal,
+    Frame
 };
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use crate::types::{Alert, AlertAction, App, AppMode, SortColumn};
+use crate::types::{Alert, AlertAction, App, AppMode, SortColumn, SortDirection};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 
@@ -82,201 +83,137 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -
 }
 
 pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<(), io::Error> {
-    terminal.draw(|f| match app.mode {
-        AppMode::Normal => {
-            let main_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .margin(1)
-                .constraints(
-                    [
-                        Constraint::Length(3), // Title
-                        Constraint::Min(0),    // Main content (Table + Action Panel)
-                        Constraint::Length(3), // Totals
-                        Constraint::Length(3), // Footer
-                    ]
-                    .as_ref(),
-                )
-                .split(f.size());
+    terminal.draw(|f| {
+        match app.mode {
+            AppMode::Normal => render_normal_mode(f, app),
+            AppMode::EditingAlert => render_editing_alert_mode(f, app),
+        }
+    })?;
+    Ok(())
+}
 
-            let title = Block::default().title("Monitetoring").borders(Borders::ALL);
-            f.render_widget(title, main_chunks[0]);
+fn render_normal_mode(f: &mut Frame, app: &App) {
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints(
+            [
+                Constraint::Length(3), // Title
+                Constraint::Min(0),    // Main content (Table + Action Panel)
+                Constraint::Length(3), // Totals
+                Constraint::Length(3), // Footer
+            ]
+            .as_ref(),
+        )
+        .split(f.size());
 
-            let content_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(if app.show_action_panel {
-                    vec![Constraint::Percentage(80), Constraint::Percentage(20)]
-                } else {
-                    vec![Constraint::Percentage(100)]
-                })
-                .split(main_chunks[1]);
+    let title = Block::default().title("Monitetoring").borders(Borders::ALL);
+    f.render_widget(title, main_chunks[0]);
 
-            let header_cells = if app.containers_mode {
-                vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total", "(C)ontainer"]
-            } else {
-                vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total"]
-            };
-            let header_cells: Vec<_> = header_cells
-                .iter()
-                .map(|h| Cell::from(*h).style(Style::default().fg(Color::Red)))
-                .collect();
-            let header = Row::new(header_cells);
+    let content_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(if app.show_action_panel {
+            vec![Constraint::Percentage(80), Constraint::Percentage(20)]
+        } else {
+            vec![Constraint::Percentage(100)]
+        })
+        .split(main_chunks[1]);
 
-            let sorted_stats = app.sorted_stats();
-            let rows = sorted_stats.iter().map(|(pid, data)| {
-                let mut style = Style::default();
-                if data.has_alert {
-                    style = style.bg(Color::Yellow).fg(Color::Black);
-                }
-                if app.selected_process == Some(**pid) {
-                    style = style.add_modifier(Modifier::BOLD);
-                }
+    let header_titles_str = if app.containers_mode {
+        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total", "(C)ontainer"]
+    } else {
+        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total"]
+    };
+    let mut header_titles: Vec<String> = header_titles_str.iter().map(|s| s.to_string()).collect();
 
-                let cells = if app.containers_mode {
-                    vec![
-                        Cell::from(pid.to_string()),
-                        Cell::from(data.name.clone()),
-                        Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
-                        Cell::from(format_bytes(data.sent)),
-                        Cell::from(format!("{}/s", format_bytes(data.received_rate))),
-                        Cell::from(format_bytes(data.received)),
-                        Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
-                    ]
-                } else {
-                    vec![
-                        Cell::from(pid.to_string()),
-                        Cell::from(data.name.clone()),
-                        Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
-                        Cell::from(format_bytes(data.sent)),
-                        Cell::from(format!("{}/s", format_bytes(data.received_rate))),
-                        Cell::from(format_bytes(data.received)),
-                    ]
-                };
-                Row::new(cells).style(style)
-            });
+    let sort_indicator = if app.sort_direction == SortDirection::Asc { " ▲" } else { " ▼" };
+    match app.sort_by {
+        SortColumn::Pid => header_titles[0].push_str(sort_indicator),
+        SortColumn::Name => header_titles[1].push_str(sort_indicator),
+        SortColumn::Sent => header_titles[2].push_str(sort_indicator),
+        SortColumn::Received => header_titles[4].push_str(sort_indicator),
+        SortColumn::Container if app.containers_mode => header_titles[6].push_str(sort_indicator),
+        _ => {}
+    }
 
-            let widths = if app.containers_mode {
-                [
-                    Constraint::Percentage(10),
-                    Constraint::Percentage(20),
-                    Constraint::Percentage(15),
-                    Constraint::Percentage(15),
-                    Constraint::Percentage(15),
-                    Constraint::Percentage(15),
-                    Constraint::Percentage(10),
-                ]
-                .as_slice()
-            } else {
-                [
-                    Constraint::Percentage(15),
-                    Constraint::Percentage(25),
-                    Constraint::Percentage(20),
-                    Constraint::Percentage(20),
-                    Constraint::Percentage(20),
-                    Constraint::Percentage(20),
-                ]
-                .as_slice()
-            };
-            let table = Table::new(rows, widths)
-                .header(header)
-                .block(Block::default().borders(Borders::ALL).title("Processes"));
-            f.render_widget(table, content_chunks[0]);
+    let header_cells: Vec<_> = header_titles
+        .iter()
+        .map(|h| Cell::from(h.as_str()).style(Style::default().fg(Color::Red)))
+        .collect();
+    let header = Row::new(header_cells);
 
-            if app.show_action_panel {
-                let action_panel_text = if let Some(pid) = app.selected_process {
-                    let mut actions = vec!["Kill Process", "Set/Edit Bandwidth Alert"];
-                    if app.alerts.contains_key(&pid) {
-                        actions.push("Remove Alert");
-                    }
+    let sorted_stats = app.sorted_stats();
+    let rows = sorted_stats.iter().map(|(pid, data)| {
+        let mut style = Style::default();
+        if data.has_alert {
+            style = style.bg(Color::Yellow).fg(Color::Black);
+        }
+        if app.selected_process == Some(**pid) {
+            style = style.add_modifier(Modifier::BOLD);
+        }
 
-                    let action_lines: Vec<Line> = actions
-                        .iter()
-                        .enumerate()
-                        .map(|(i, action)| {
-                            if i == app.selected_action {
-                                Line::from(Span::styled(
-                                    format!("> {}", action),
-                                    Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
-                                ))
-                            } else {
-                                Line::from(format!("  {}", action))
-                            }
-                        })
-                        .collect();
+        let cells = if app.containers_mode {
+            vec![
+                Cell::from(pid.to_string()),
+                Cell::from(data.name.clone()),
+                Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
+                Cell::from(format_bytes(data.sent)),
+                Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                Cell::from(format_bytes(data.received)),
+                Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
+            ]
+        } else {
+            vec![
+                Cell::from(pid.to_string()),
+                Cell::from(data.name.clone()),
+                Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
+                Cell::from(format_bytes(data.sent)),
+                Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                Cell::from(format_bytes(data.received)),
+            ]
+        };
+        Row::new(cells).style(style)
+    });
 
-                    let mut text = Text::from(vec![Line::from(format!("Actions for PID {}:", pid))]);
-                    text.extend(action_lines);
-                    text
-                } else {
-                    Text::from("No process selected")
-                };
+    let widths = if app.containers_mode {
+        [
+            Constraint::Percentage(10),
+            Constraint::Percentage(20),
+            Constraint::Percentage(15),
+            Constraint::Percentage(15),
+            Constraint::Percentage(15),
+            Constraint::Percentage(15),
+            Constraint::Percentage(10),
+        ]
+        .as_slice()
+    } else {
+        [
+            Constraint::Percentage(15),
+            Constraint::Percentage(25),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+        ]
+        .as_slice()
+    };
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(Block::default().borders(Borders::ALL).title("Processes"));
+    f.render_widget(table, content_chunks[0]);
 
-                let action_panel = Paragraph::new(action_panel_text)
-                    .block(Block::default().borders(Borders::ALL).title("Actions (Esc to close)"));
-                f.render_widget(action_panel, content_chunks[1]);
+    if app.show_action_panel {
+        let action_panel_text = if let Some(pid) = app.selected_process {
+            let mut actions = vec!["Kill Process", "Set/Edit Bandwidth Alert"];
+            if app.alerts.contains_key(&pid) {
+                actions.push("Remove Alert");
             }
 
-            let (total_sent, total_received, total_sent_rate, total_received_rate) = app.totals();
-            let totals_text = format!(
-                "📊 TOTALS: Sent {}/s ({} total) | Received {}/s ({} total)",
-                format_bytes(total_sent_rate),
-                format_bytes(total_sent),
-                format_bytes(total_received_rate),
-                format_bytes(total_received)
-            );
-            let totals = Paragraph::new(totals_text)
-                .block(Block::default().borders(Borders::ALL).title("Network Totals"));
-            f.render_widget(totals, main_chunks[2]);
-
-            let footer_text = if app.containers_mode {
-                "q: quit | p/n/s/r/c: sort | ↑/↓: select | Enter: actions"
-            } else {
-                "q: quit | p/n/s/r: sort | ↑/↓: select | Enter: actions"
-            };
-            let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::ALL));
-            f.render_widget(footer, main_chunks[3]);
-        }
-        AppMode::EditingAlert => {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .margin(2)
-                .constraints(
-                    [
-                        Constraint::Length(3), // Title
-                        Constraint::Length(3), // Input (threshold or command)
-                        Constraint::Min(0),    // Actions
-                    ]
-                    .as_ref(),
-                )
-                .split(f.size());
-
-            let title_text = if let Some(pid) = app.selected_process {
-                format!("Editing Alert for PID: {}", pid)
-            } else {
-                "Editing Alert".to_string()
-            };
-            let title = Paragraph::new(title_text)
-                .block(Block::default().borders(Borders::ALL).title("Alert Editor (Esc to cancel, Enter to save)"));
-            f.render_widget(title, chunks[0]);
-
-            // Input field - changes based on selected action
-            let (input_title, input_text) = if app.selected_alert_action == 0 {
-                ("Threshold (e.g., 10MB, 2GB)", app.alert_input.as_str())
-            } else {
-                ("Format: threshold,command (e.g., 10MB,shutdown)", app.alert_input.as_str())
-            };
-            
-            let input = Paragraph::new(input_text)
-                .style(Style::default().fg(Color::Yellow))
-                .block(Block::default().borders(Borders::ALL).title(input_title));
-            f.render_widget(input, chunks[1]);
-            f.set_cursor(chunks[1].x + input_text.len() as u16 + 1, chunks[1].y + 1);
-
-            let actions = vec!["Kill Process", "Custom Command"];
             let action_lines: Vec<Line> = actions
                 .iter()
                 .enumerate()
                 .map(|(i, action)| {
-                    if i == app.selected_alert_action {
+                    if i == app.selected_action {
                         Line::from(Span::styled(
                             format!("> {}", action),
                             Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
@@ -287,12 +224,99 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
                 })
                 .collect();
 
-            let actions_widget = Paragraph::new(Text::from(action_lines))
-                .block(Block::default().borders(Borders::ALL).title("Action"));
-            f.render_widget(actions_widget, chunks[2]);
-        }
-    })?;
-    Ok(())
+            let mut text = Text::from(vec![Line::from(format!("Actions for PID {}:", pid))]);
+            text.extend(action_lines);
+            text
+        } else {
+            Text::from("No process selected")
+        };
+
+        let action_panel = Paragraph::new(action_panel_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Actions (Esc to close)")
+                    .style(Style::default().bg(Color::DarkGray))
+            );
+        f.render_widget(action_panel, content_chunks[1]);
+    }
+
+    let (total_sent, total_received, total_sent_rate, total_received_rate) = app.totals();
+    let totals_text = format!(
+        "📊 TOTALS: Sent {}/s ({} total) | Received {}/s ({} total)",
+        format_bytes(total_sent_rate),
+        format_bytes(total_sent),
+        format_bytes(total_received_rate),
+        format_bytes(total_received)
+    );
+    let totals = Paragraph::new(totals_text)
+        .block(Block::default().borders(Borders::ALL).title("Network Totals"));
+    f.render_widget(totals, main_chunks[2]);
+
+    let footer_text = if app.containers_mode {
+        "q: quit | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
+    } else {
+        "q: quit | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
+    };
+    let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::ALL));
+    f.render_widget(footer, main_chunks[3]);
+}
+
+fn render_editing_alert_mode(f: &mut Frame, app: &App) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(2)
+        .constraints(
+            [
+                Constraint::Length(3), // Title
+                Constraint::Length(3), // Input (threshold or command)
+                Constraint::Min(0),    // Actions
+            ]
+            .as_ref(),
+        )
+        .split(f.size());
+
+    let title_text = if let Some(pid) = app.selected_process {
+        format!("Editing Alert for PID: {}", pid)
+    } else {
+        "Editing Alert".to_string()
+    };
+    let title = Paragraph::new(title_text)
+        .block(Block::default().borders(Borders::ALL).title("Alert Editor (Esc to cancel, Enter to save)"));
+    f.render_widget(title, chunks[0]);
+
+    // Input field - changes based on selected action
+    let (input_title, input_text) = if app.selected_alert_action == 0 {
+        ("Threshold (e.g., 10MB, 2GB)", app.alert_input.as_str())
+    } else {
+        ("Format: threshold,command (e.g., 10MB,shutdown)", app.alert_input.as_str())
+    };
+    
+    let input = Paragraph::new(input_text)
+        .style(Style::default().fg(Color::Yellow))
+        .block(Block::default().borders(Borders::ALL).title(input_title));
+    f.render_widget(input, chunks[1]);
+    f.set_cursor(chunks[1].x + input_text.len() as u16 + 1, chunks[1].y + 1);
+
+    let actions = vec!["Kill Process", "Custom Command"];
+    let action_lines: Vec<Line> = actions
+        .iter()
+        .enumerate()
+        .map(|(i, action)| {
+            if i == app.selected_alert_action {
+                Line::from(Span::styled(
+                    format!("> {}", action),
+                    Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+                ))
+            } else {
+                Line::from(format!("  {}", action))
+            }
+        })
+        .collect();
+
+    let actions_widget = Paragraph::new(Text::from(action_lines))
+        .block(Block::default().borders(Borders::ALL).title("Action"));
+    f.render_widget(actions_widget, chunks[2]);
 }
 
 pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
@@ -444,6 +468,13 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                         if app.containers_mode {
                             app.sort_by = SortColumn::Container;
                         }
+                    }
+                    KeyCode::Char('d') => {
+                        app.sort_direction = if app.sort_direction == SortDirection::Asc {
+                            SortDirection::Desc
+                        } else {
+                            SortDirection::Asc
+                        };
                     }
                     KeyCode::Down => {
                         let sorted_pids: Vec<i32> = app.sorted_stats().iter().map(|(pid, _)| **pid).collect();

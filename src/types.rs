@@ -79,6 +79,13 @@ pub struct ProcessIdentifier {
     pub container_name: Option<String>,
 }
 
+#[derive(PartialEq)]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
+#[derive(PartialEq)]
 pub enum SortColumn {
     Pid,
     Name,
@@ -95,6 +102,7 @@ pub enum AppMode {
 pub struct App {
     pub stats: HashMap<i32, ProcessInfo>,
     pub sort_by: SortColumn,
+    pub sort_direction: SortDirection,
     pub containers_mode: bool,
     pub alerts: HashMap<i32, Alert>,
     pub selected_process: Option<i32>,
@@ -113,6 +121,7 @@ impl App {
         App {
             stats: HashMap::new(),
             sort_by: SortColumn::Pid,
+            sort_direction: SortDirection::Asc,
             containers_mode,
             alerts: HashMap::new(),
             selected_process: None,
@@ -148,17 +157,13 @@ impl App {
         match self.sort_by {
             SortColumn::Pid => sorted.sort_by_key(|(pid, _)| *pid),
             SortColumn::Name => sorted.sort_by_key(|(_, info)| &info.name),
-            SortColumn::Sent => {
-                sorted.sort_by_key(|(_, info)| info.sent);
-                sorted.reverse();
-            }
-            SortColumn::Received => {
-                sorted.sort_by_key(|(_, info)| info.received);
-                sorted.reverse();
-            }
-            SortColumn::Container => {
-                sorted.sort_by_key(|(_, info)| &info.container_name);
-            }
+            SortColumn::Sent => sorted.sort_by_key(|(_, info)| info.sent),
+            SortColumn::Received => sorted.sort_by_key(|(_, info)| info.received),
+            SortColumn::Container => sorted.sort_by_key(|(_, info)| &info.container_name),
+        }
+
+        if self.sort_direction == SortDirection::Desc {
+            sorted.reverse();
         }
         sorted
     }
