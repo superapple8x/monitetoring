@@ -1,7 +1,7 @@
 use std::io;
 use ratatui::{
     backend::CrosstermBackend,
-    widgets::{Block, Borders, Paragraph, Table, Row, Cell},
+    widgets::{Block, Borders, Paragraph, Table, Row, Cell, Chart, Dataset, Axis, GraphType, TableState},
     layout::{Layout, Constraint, Direction},
     style::{Style, Color, Modifier},
     text::{Line, Span, Text},
@@ -85,7 +85,13 @@ pub fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -
 pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<(), io::Error> {
     terminal.draw(|f| {
         match app.mode {
-            AppMode::Normal => render_normal_mode(f, app),
+            AppMode::Normal => {
+                if app.bandwidth_mode {
+                    render_bandwidth_mode(f, app);
+                } else {
+                    render_normal_mode(f, app);
+                }
+            }
             AppMode::EditingAlert => render_editing_alert_mode(f, app),
         }
     })?;
@@ -110,14 +116,27 @@ fn render_normal_mode(f: &mut Frame, app: &App) {
     let title = Block::default().title("Monitetoring").borders(Borders::ALL);
     f.render_widget(title, main_chunks[0]);
 
-    let content_chunks = Layout::default()
+    // When bandwidth_mode is inactive, use full width for table; otherwise split for potential side chart
+    let content_chunks = if app.bandwidth_mode {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+            .split(main_chunks[1])
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(100)].as_ref())
+            .split(main_chunks[1])
+    };
+
+    let table_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(if app.show_action_panel {
             vec![Constraint::Percentage(80), Constraint::Percentage(20)]
         } else {
             vec![Constraint::Percentage(100)]
         })
-        .split(main_chunks[1]);
+        .split(content_chunks[0]);
 
     let header_titles_str = if app.containers_mode {
         vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total", "(C)ontainer"]
@@ -200,7 +219,16 @@ fn render_normal_mode(f: &mut Frame, app: &App) {
     let table = Table::new(rows, widths)
         .header(header)
         .block(Block::default().borders(Borders::ALL).title("Processes"));
-    f.render_widget(table, content_chunks[0]);
+
+    // Create table state and set selection to the currently selected process
+    let mut table_state = TableState::default();
+    if let Some(selected_pid) = app.selected_process {
+        if let Some(index) = sorted_stats.iter().position(|(pid, _)| **pid == selected_pid) {
+            table_state.select(Some(index));
+        }
+    }
+    
+    f.render_stateful_widget(table, content_chunks[0], &mut table_state);
 
     if app.show_action_panel {
         let action_panel_text = if let Some(pid) = app.selected_process {
@@ -238,7 +266,11 @@ fn render_normal_mode(f: &mut Frame, app: &App) {
                     .title("Actions (Esc to close)")
                     .style(Style::default().bg(Color::DarkGray))
             );
-        f.render_widget(action_panel, content_chunks[1]);
+        f.render_widget(action_panel, table_chunks[1]);
+    }
+
+    if app.bandwidth_mode && content_chunks.len() > 1 {
+        render_charts(f, app, content_chunks[1]);
     }
 
     let (total_sent, total_received, total_sent_rate, total_received_rate) = app.totals();
@@ -260,13 +292,82 @@ fn render_normal_mode(f: &mut Frame, app: &App) {
         f.render_widget(alert_message, main_chunks[3]);
     } else {
         let footer_text = if app.containers_mode {
-            "q: quit | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
+            "q: quit | b: bandwidth | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
         } else {
-            "q: quit | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
+            "q: quit | b: bandwidth | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
         };
         let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::ALL));
         f.render_widget(footer, main_chunks[3]);
     }
+}
+
+fn render_charts(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    let (datasets, y_max) = if let Some(pid) = app.selected_process {
+        if let Some(process_info) = app.stats.get(&pid) {
+            let mut max_val = 0f64;
+            for &(_, v) in process_info.sent_history.iter().chain(process_info.received_history.iter()) {
+                if v > max_val {
+                    max_val = v;
+                }
+            }
+            let y_max = if max_val < 1f64 { 1f64 } else { max_val * 1.2 };
+            let datasets = vec![
+                Dataset::default()
+                    .name("Sent")
+                    .marker(ratatui::symbols::Marker::Braille)
+                    .style(Style::default().fg(Color::Cyan))
+                    .graph_type(GraphType::Line)
+                    .data(&process_info.sent_history),
+                Dataset::default()
+                    .name("Received")
+                    .marker(ratatui::symbols::Marker::Braille)
+                    .style(Style::default().fg(Color::Magenta))
+                    .graph_type(GraphType::Line)
+                    .data(&process_info.received_history),
+            ];
+            (datasets, y_max)
+        } else {
+            (Vec::new(), 1f64)
+        }
+    } else {
+        (Vec::new(), 1f64)
+    };
+
+    let now = app.start_time.elapsed().as_secs_f64();
+    let x_min = if now > 300.0 { now - 300.0 } else { 0.0 };
+    let x_axis = Axis::default()
+        .title("Time (s)")
+        .style(Style::default().fg(Color::Gray))
+        .bounds([x_min, now]);
+
+    let format_rate = |rate: f64| -> String {
+        format!("{}/s", format_bytes(rate as u64))
+    };
+
+    // Build 5 evenly spaced labels for Y axis (0, 25%, 50%, 75%, 100%)
+    let y_labels: Vec<Span> = (0..=4)
+        .map(|i| {
+            let val = y_max * i as f64 / 4.0;
+            Span::raw(format_rate(val))
+        })
+        .collect();
+
+    let y_axis = Axis::default()
+        .title("Bandwidth")
+        .style(Style::default().fg(Color::Gray))
+        .labels(y_labels)
+        .bounds([0.0, y_max]);
+
+    let chart = Chart::new(datasets)
+        .block(
+            Block::default()
+                .title("Real-time Bandwidth (last 5 min)")
+                .borders(Borders::ALL),
+        )
+        .x_axis(x_axis)
+        .y_axis(y_axis);
+
+    f.render_widget(chart, area);
 }
 
 fn render_editing_alert_mode(f: &mut Frame, app: &App) {
@@ -342,6 +443,150 @@ fn render_editing_alert_mode(f: &mut Frame, app: &App) {
     let actions_widget = Paragraph::new(Text::from(action_lines))
         .block(Block::default().borders(Borders::ALL).title("Action (use Tab to switch fields)"));
     f.render_widget(actions_widget, chunks[3]);
+}
+
+fn render_bandwidth_mode(f: &mut Frame, app: &App) {
+    // Layout: Title, Chart (70%), Compact Table (rest), Totals, Footer
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints(
+            [
+                Constraint::Length(3),               // Title
+                Constraint::Percentage(70),          // Chart
+                Constraint::Min(0),                  // Table
+                Constraint::Length(3),               // Totals
+                Constraint::Length(3),               // Footer / Alert
+            ]
+            .as_ref(),
+        )
+        .split(f.size());
+
+    // Title
+    let title = Block::default().title("Monitetoring – Bandwidth View (Press 'b' to close)").borders(Borders::ALL);
+    f.render_widget(title, main_chunks[0]);
+
+    // Chart
+    render_charts(f, app, main_chunks[1]);
+
+    // Full process table (same columns as normal view)
+    let header_titles_str = if app.containers_mode {
+        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total", "(C)ontainer"]
+    } else {
+        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total"]
+    };
+    let mut header_titles: Vec<String> = header_titles_str.iter().map(|s| s.to_string()).collect();
+
+    let sort_indicator = if app.sort_direction == SortDirection::Asc { " ▲" } else { " ▼" };
+    match app.sort_by {
+        SortColumn::Pid => header_titles[0].push_str(sort_indicator),
+        SortColumn::Name => header_titles[1].push_str(sort_indicator),
+        SortColumn::Sent => header_titles[2].push_str(sort_indicator),
+        SortColumn::Received => header_titles[4].push_str(sort_indicator),
+        SortColumn::Container if app.containers_mode => header_titles[6].push_str(sort_indicator),
+        _ => {}
+    }
+
+    let header_cells: Vec<_> = header_titles
+        .iter()
+        .map(|h| Cell::from(h.as_str()).style(Style::default().fg(Color::Red)))
+        .collect();
+    let header = Row::new(header_cells);
+
+    let sorted_stats = app.sorted_stats();
+    let rows = sorted_stats.iter().map(|(pid, data)| {
+        let mut style = Style::default();
+        if data.has_alert {
+            style = style.bg(Color::Yellow).fg(Color::Black);
+        }
+        if app.selected_process == Some(**pid) {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+
+        let cells = if app.containers_mode {
+            vec![
+                Cell::from(pid.to_string()),
+                Cell::from(data.name.clone()),
+                Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
+                Cell::from(format_bytes(data.sent)),
+                Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                Cell::from(format_bytes(data.received)),
+                Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
+            ]
+        } else {
+            vec![
+                Cell::from(pid.to_string()),
+                Cell::from(data.name.clone()),
+                Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
+                Cell::from(format_bytes(data.sent)),
+                Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                Cell::from(format_bytes(data.received)),
+            ]
+        };
+        Row::new(cells).style(style)
+    });
+
+    let widths = if app.containers_mode {
+        [
+            Constraint::Percentage(10),
+            Constraint::Percentage(20),
+            Constraint::Percentage(15),
+            Constraint::Percentage(15),
+            Constraint::Percentage(15),
+            Constraint::Percentage(15),
+            Constraint::Percentage(10),
+        ]
+        .as_slice()
+    } else {
+        [
+            Constraint::Percentage(15),
+            Constraint::Percentage(25),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+            Constraint::Percentage(20),
+        ]
+        .as_slice()
+    };
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .block(Block::default().borders(Borders::ALL).title("Processes"));
+
+    // Create table state and set selection to the currently selected process
+    let mut table_state = TableState::default();
+    if let Some(selected_pid) = app.selected_process {
+        if let Some(index) = sorted_stats.iter().position(|(pid, _)| **pid == selected_pid) {
+            table_state.select(Some(index));
+        }
+    }
+    
+    f.render_stateful_widget(table, main_chunks[2], &mut table_state);
+
+    // Totals (reuse existing helper)
+    let (total_sent, total_received, total_sent_rate, total_received_rate) = app.totals();
+    let totals_text = format!(
+        "📊 TOTALS: Sent {}/s ({} total) | Received {}/s ({} total)",
+        format_bytes(total_sent_rate),
+        format_bytes(total_sent),
+        format_bytes(total_received_rate),
+        format_bytes(total_received)
+    );
+    let totals = Paragraph::new(totals_text)
+        .block(Block::default().borders(Borders::ALL).title("Network Totals"));
+    f.render_widget(totals, main_chunks[3]);
+
+    // Footer / Alerts
+    if let Some(msg) = &app.last_alert_message {
+        let alert_message = Paragraph::new(msg.as_str())
+            .style(Style::default().fg(Color::Yellow))
+            .block(Block::default().borders(Borders::ALL).title("Last Alert"));
+        f.render_widget(alert_message, main_chunks[4]);
+    } else {
+        let footer = Paragraph::new("q: quit | b: toggle view | ↑/↓: select | Enter: actions")
+            .block(Block::default().borders(Borders::ALL));
+        f.render_widget(footer, main_chunks[4]);
+    }
 }
 
 pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
@@ -508,6 +753,9 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                         } else {
                             SortDirection::Asc
                         };
+                    }
+                    KeyCode::Char('b') => {
+                        app.bandwidth_mode = !app.bandwidth_mode;
                     }
                     KeyCode::Down => {
                         let sorted_pids: Vec<i32> = app.sorted_stats().iter().map(|(pid, _)| **pid).collect();

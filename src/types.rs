@@ -39,6 +39,8 @@ pub struct ProcessInfo {
     pub received_rate: u64,  // bytes per second
     pub container_name: Option<String>,
     pub has_alert: bool,
+    pub sent_history: Vec<(f64, f64)>,
+    pub received_history: Vec<(f64, f64)>,
 }
 
 #[derive(Clone, Serialize)]
@@ -105,6 +107,7 @@ pub enum EditingField {
 }
 
 pub struct App {
+    pub start_time: Instant,
     pub stats: HashMap<i32, ProcessInfo>,
     pub sort_by: SortColumn,
     pub sort_direction: SortDirection,
@@ -121,11 +124,13 @@ pub struct App {
     pub killed_processes: HashSet<i32>,
     pub alert_cooldowns: HashMap<i32, Instant>,
     pub last_alert_message: Option<String>,
+    pub bandwidth_mode: bool,
 }
 
 impl App {
     pub fn new(containers_mode: bool) -> Self {
         App {
+            start_time: Instant::now(),
             stats: HashMap::new(),
             sort_by: SortColumn::Pid,
             sort_direction: SortDirection::Asc,
@@ -142,6 +147,7 @@ impl App {
             killed_processes: HashSet::new(),
             alert_cooldowns: HashMap::new(),
             last_alert_message: None,
+            bandwidth_mode: false,
         }
     }
 

@@ -249,7 +249,7 @@ async fn main() -> Result<(), io::Error> {
                         };
                         
                         if let Some(proc_identifier) = inode_map.get(&found_inode) {
-                            let stats = bandwidth_map.entry(proc_identifier.pid).or_insert(ProcessInfo { 
+                            let stats = bandwidth_map.entry(proc_identifier.pid).or_insert(ProcessInfo {
                                 name: proc_identifier.name.clone(),
                                 sent: 0,
                                 received: 0,
@@ -257,6 +257,8 @@ async fn main() -> Result<(), io::Error> {
                                 received_rate: 0,
                                 container_name: proc_identifier.container_name.clone(),
                                 has_alert: false, // Default value
+                                sent_history: Vec::new(),
+                                received_history: Vec::new(),
                             });
                             
                             // Determine direction based on which connection matched
@@ -355,6 +357,8 @@ async fn main() -> Result<(), io::Error> {
                         received_rate: 0,
                         container_name: new_info.container_name.clone(),
                         has_alert,
+                        sent_history: Vec::new(),
+                        received_history: Vec::new(),
                     });
                     stats.sent = new_info.sent;
                     stats.received = new_info.received;
@@ -363,6 +367,15 @@ async fn main() -> Result<(), io::Error> {
                     stats.name = new_info.name;
                     stats.container_name = new_info.container_name;
                     stats.has_alert = has_alert;
+
+                    let now = app.start_time.elapsed().as_secs_f64();
+                    stats.sent_history.push((now, new_info.sent_rate as f64));
+                    stats.received_history.push((now, new_info.received_rate as f64));
+
+                    // Retain only the last 10 minutes of history to avoid unbounded growth
+                    let cutoff = now - 600.0; // 600s = 10 min
+                    stats.sent_history.retain(|(t, _)| *t >= cutoff);
+                    stats.received_history.retain(|(t, _)| *t >= cutoff);
                 }
                 
                 // Remove killed processes from the stats entirely
