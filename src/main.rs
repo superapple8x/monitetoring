@@ -22,7 +22,7 @@ use config::{Cli, reset_config, load_config};
 use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction};
 use process::refresh_proc_maps;
 use capture::connection_from_packet;
-use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event, update_chart_datasets};
+use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event, update_chart_datasets, utils::format_bytes};
 use interactive::run_interactive_mode;
 
 fn display_startup_info(iface: &str, is_json: bool, containers_enabled: bool) {
@@ -67,11 +67,11 @@ fn show_interface_help() {
     eprintln!("📖 Use --help for more options");
 }
 
-fn execute_alert_action(action: &AlertAction, pid: i32, name: &str) -> (bool, Option<String>) {
+fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent: u64, current_received: u64, threshold: u64) -> (bool, Option<String>, Option<String>) {
     match action {
         AlertAction::SystemAlert => {
             // Just return a notification message, no process killing
-            (false, Some(format!("🚨 System Alert: {} (PID {}) exceeded bandwidth threshold", name, pid)))
+            (false, Some(format!("🚨 System Alert: {} (PID {}) exceeded bandwidth threshold", name, pid)), None)
         }
         AlertAction::Kill => {
             // First, send the kill signal
@@ -81,11 +81,11 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str) -> (bool, Op
                 }
                 Err(e) if e == Errno::ESRCH => {
                     // Process already doesn't exist, which is a success in this context
-                    return (true, Some(format!("💀 Process {} (PID {}) was already gone", name, pid)));
+                    return (true, Some(format!("💀 Process {} (PID {}) was already gone", name, pid)), None);
                 }
                 Err(e) => {
                     // Another error, like permissions
-                    return (false, Some(format!("❌ Failed to send kill signal to {} (PID {}): {}", name, pid, e)));
+                    return (false, Some(format!("❌ Failed to send kill signal to {} (PID {}): {}", name, pid, e)), None);
                 }
             }
 
@@ -100,7 +100,7 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str) -> (bool, Op
                     }
                     Err(e) if e == Errno::ESRCH => {
                         // Process does not exist, success!
-                        return (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)));
+                        return (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)), None);
                     }
                     Err(_) => {
                         // Some other error, assume failure to check
@@ -110,28 +110,85 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str) -> (bool, Op
             }
 
             // If the loop finishes and we haven't returned, the process is still alive
-            (false, Some(format!("❌ Failed to kill {} (PID {}): Process still running", name, pid)))
+            (false, Some(format!("❌ Failed to kill {} (PID {}): Process still running", name, pid)), None)
         }
         AlertAction::CustomCommand(cmd) => {
-            eprintln!("🔧 Executing custom command for {} (PID {}): {}", name, pid, cmd);
+            let start_time = Instant::now();
+            let total_usage = current_sent + current_received;
+            
+            // Create the execution log entry that shows immediately
+            let execution_log_entry = format!(
+                "🔧 Executing custom command for {} (PID {}): {} | Usage: {} ({}% over threshold)",
+                name, pid, cmd, format_bytes(total_usage),
+                ((total_usage as f64 / threshold as f64 - 1.0) * 100.0) as u32
+            );
             
             let mut command = Command::new("sh");
             command.arg("-c").arg(cmd)
                 .env("MONITETORING_PID", pid.to_string())
                 .env("MONITETORING_PROCESS_NAME", name)
-                .env("MONITETORING_BANDWIDTH_EXCEEDED", "true");
+                .env("MONITETORING_BANDWIDTH_EXCEEDED", "true")
+                .env("MONITETORING_SENT_BYTES", current_sent.to_string())
+                .env("MONITETORING_RECEIVED_BYTES", current_received.to_string())
+                .env("MONITETORING_TOTAL_BYTES", total_usage.to_string())
+                .env("MONITETORING_THRESHOLD_BYTES", threshold.to_string())
+                .env("MONITETORING_EXCESS_BYTES", (total_usage.saturating_sub(threshold)).to_string())
+                .env("MONITETORING_TIMESTAMP", chrono::Utc::now().to_rfc3339());
             
-            match command.status() {
-                Ok(status) => {
-                    if status.success() {
-                        (false, Some(format!("✅ Custom command executed successfully for {} (PID {})", name, pid)))
-                    } else {
-                        (false, Some(format!("❌ Custom command failed (exit code: {}) for {} (PID {})", 
-                                           status.code().unwrap_or(-1), name, pid)))
+            // Use spawn() with timeout instead of status() for better control
+            match command.spawn() {
+                Ok(mut child) => {
+                    // Wait for the process with a timeout
+                    let timeout_duration = Duration::from_secs(30); // 30 second timeout
+                    let poll_start = Instant::now();
+                    
+                    loop {
+                        match child.try_wait() {
+                            Ok(Some(status)) => {
+                                let execution_time = start_time.elapsed();
+                                if status.success() {
+                                    return (false, Some(format!(
+                                        "✅ Custom command executed successfully for {} (PID {}) in {:.2}s | Usage: {} ({}% over threshold)", 
+                                        name, pid, execution_time.as_secs_f64(),
+                                        format_bytes(total_usage),
+                                        ((total_usage as f64 / threshold as f64 - 1.0) * 100.0) as u32
+                                    )), Some(execution_log_entry));
+                                } else {
+                                    return (false, Some(format!(
+                                        "❌ Custom command failed (exit code: {}) for {} (PID {}) after {:.2}s | Usage: {}", 
+                                        status.code().unwrap_or(-1), name, pid, 
+                                        execution_time.as_secs_f64(), format_bytes(total_usage)
+                                    )), Some(execution_log_entry));
+                                }
+                            }
+                            Ok(None) => {
+                                // Process is still running
+                                if poll_start.elapsed() > timeout_duration {
+                                    // Timeout reached, kill the child process
+                                    let _ = child.kill();
+                                    let _ = child.wait(); // Clean up zombie
+                                    return (false, Some(format!(
+                                        "⏰ Custom command timed out after {}s for {} (PID {}) | Usage: {}", 
+                                        timeout_duration.as_secs(), name, pid, format_bytes(total_usage)
+                                    )), Some(execution_log_entry));
+                                }
+                                // Sleep briefly before checking again
+                                thread::sleep(Duration::from_millis(100));
+                            }
+                            Err(e) => {
+                                return (false, Some(format!(
+                                    "❌ Error waiting for custom command for {} (PID {}): {} | Usage: {}", 
+                                    name, pid, e, format_bytes(total_usage)
+                                )), Some(execution_log_entry));
+                            }
+                        }
                     }
                 }
                 Err(e) => {
-                    (false, Some(format!("❌ Custom command error for {} (PID {}): {}", name, pid, e)))
+                    (false, Some(format!(
+                        "❌ Failed to spawn custom command for {} (PID {}): {} | Usage: {}", 
+                        name, pid, e, format_bytes(total_usage)
+                    )), Some(execution_log_entry))
                 }
             }
         }
@@ -416,11 +473,21 @@ async fn main() -> Result<(), io::Error> {
                         };
                         
                         if should_trigger {
-                            let (was_killed, message) = execute_alert_action(&alert.action, *pid, &stats.name);
+                            let (was_killed, message, log_entry) = execute_alert_action(&alert.action, *pid, &stats.name, stats.sent, stats.received, alert.threshold_bytes);
                             if was_killed {
                                 processes_to_kill.push(*pid);
                             }
                             app.last_alert_message = message;
+                            
+                            // Add execution log entry if available
+                            if let Some(log_msg) = log_entry {
+                                app.command_execution_log.push((now, log_msg));
+                                // Keep only the last 50 log entries to prevent unbounded growth
+                                if app.command_execution_log.len() > 50 {
+                                    app.command_execution_log.remove(0);
+                                }
+                            }
+                            
                             // Set cooldown
                             app.alert_cooldowns.insert(*pid, now);
                         }
@@ -450,5 +517,6 @@ async fn main() -> Result<(), io::Error> {
 
     Ok(())
 }
+
 
 

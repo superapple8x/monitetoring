@@ -142,6 +142,7 @@ pub struct App {
     pub killed_processes: HashSet<i32>,
     pub alert_cooldowns: HashMap<i32, Instant>,
     pub last_alert_message: Option<String>,
+    pub command_execution_log: Vec<(Instant, String)>, // Timestamped execution log
     pub bandwidth_mode: bool,
     pub system_bandwidth_history: Vec<(f64, Vec<(i32, f64, f64)>)>, // (timestamp, [(pid, sent_rate, received_rate)])
     pub chart_type: ChartType,
@@ -178,6 +179,7 @@ impl App {
             killed_processes: HashSet::new(),
             alert_cooldowns: HashMap::new(),
             last_alert_message: None,
+            command_execution_log: Vec::new(),
             bandwidth_mode: false,
             system_bandwidth_history: Vec::new(),
             chart_type: ChartType::ProcessLines,

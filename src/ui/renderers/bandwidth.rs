@@ -153,12 +153,57 @@ fn render_totals_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
 /// Render the footer with bandwidth-specific controls
 fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    // Check if we have recent command execution or alert message
+    let recent_log_entry = app.command_execution_log.last();
+    
     if let Some(msg) = &app.last_alert_message {
-        let alert_message = Paragraph::new(msg.as_str())
-            .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().borders(Borders::ALL).title("Last Alert"));
-        f.render_widget(alert_message, area);
+        // Split the area if we also have a recent command execution
+        if let Some((timestamp, log_msg)) = recent_log_entry {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Length(3)].as_ref())
+                .split(area);
+            
+            // Show command execution log entry first
+            let elapsed = timestamp.elapsed().as_secs();
+            let time_str = if elapsed < 60 {
+                format!("{}s ago", elapsed)
+            } else {
+                format!("{}m ago", elapsed / 60)
+            };
+            
+            let execution_message = Paragraph::new(format!("{} ({})", log_msg, time_str))
+                .style(Style::default().fg(Color::Cyan))
+                .block(Block::default().borders(Borders::ALL).title("Command Execution"));
+            f.render_widget(execution_message, chunks[0]);
+            
+            // Show alert message below
+            let alert_message = Paragraph::new(msg.as_str())
+                .style(Style::default().fg(Color::Yellow))
+                .block(Block::default().borders(Borders::ALL).title("Last Alert"));
+            f.render_widget(alert_message, chunks[1]);
+        } else {
+            // Only alert message
+            let alert_message = Paragraph::new(msg.as_str())
+                .style(Style::default().fg(Color::Yellow))
+                .block(Block::default().borders(Borders::ALL).title("Last Alert"));
+            f.render_widget(alert_message, area);
+        }
+    } else if let Some((timestamp, log_msg)) = recent_log_entry {
+        // Only command execution log
+        let elapsed = timestamp.elapsed().as_secs();
+        let time_str = if elapsed < 60 {
+            format!("{}s ago", elapsed)
+        } else {
+            format!("{}m ago", elapsed / 60)
+        };
+        
+        let execution_message = Paragraph::new(format!("{} ({})", log_msg, time_str))
+            .style(Style::default().fg(Color::Cyan))
+            .block(Block::default().borders(Borders::ALL).title("Command Execution"));
+        f.render_widget(execution_message, area);
     } else {
+        // Default footer text
         let footer_text = if app.bandwidth_mode && app.chart_type == ChartType::SystemStacked {
             "q: quit | b: toggle view | t: chart type | m: metrics | ↑/↓: select | Enter: actions"
         } else {
