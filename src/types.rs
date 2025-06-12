@@ -100,6 +100,7 @@ pub enum SortColumn {
 pub enum AppMode {
     Normal,
     EditingAlert,
+    SystemOverview,
 }
 
 pub enum EditingField {
@@ -119,6 +120,9 @@ pub enum ChartType {
     ProcessLines,    // Line chart for individual process
     SystemStacked,   // Stacked area chart for all processes
 }
+
+
+
 
 pub struct App {
     pub start_time: Instant,
@@ -144,6 +148,14 @@ pub struct App {
     pub chart_datasets: Vec<(String, Vec<(f64, f64)>, ratatui::style::Color)>,
     pub process_colors: HashMap<String, Color>,
     pub metrics_mode: MetricsMode,
+    // System Overview Dashboard fields
+    pub system_stats: SystemStats,
+    pub system_stats_prev: SystemStats,
+    pub total_quota_threshold: u64,
+    pub threshold_exceeded: bool,
+    pub threshold_exceeded_time: Option<Instant>,
+    pub system_alerts: HashSet<i32>, // PIDs with system alerts that should blink
+
 }
 
 impl App {
@@ -172,6 +184,13 @@ impl App {
             chart_datasets: Vec::new(),
             process_colors: HashMap::new(),
             metrics_mode: MetricsMode::Combined,
+            // System Overview Dashboard fields
+            system_stats: SystemStats::new(),
+            system_stats_prev: SystemStats::new(),
+            total_quota_threshold: 1024 * 1024 * 1024, // Default 1 GB total quota
+            threshold_exceeded: false,
+            threshold_exceeded_time: None,
+            system_alerts: HashSet::new(),
         }
     }
 
@@ -206,12 +225,76 @@ impl App {
         }
         sorted
     }
+
+
+
+    pub fn update_system_stats(&mut self) {
+        // Store previous stats for rate calculation
+        self.system_stats_prev = self.system_stats.clone();
+        
+        // Reset current stats
+        self.system_stats = SystemStats::new();
+        
+        // Aggregate protocol statistics from all processes
+        for (_, process_info) in &self.stats {
+            // For now, we'll estimate protocol breakdown (this should be collected from packet capture)
+            // TCP is typically the majority of traffic, UDP is less, ICMP minimal
+            let total_rate = process_info.sent_rate + process_info.received_rate;
+            
+            // Rough estimation - in real implementation this would come from packet analysis
+            self.system_stats.tcp_rate += (total_rate as f64 * 0.8) as u64;
+            self.system_stats.udp_rate += (total_rate as f64 * 0.15) as u64;
+            self.system_stats.icmp_rate += (total_rate as f64 * 0.01) as u64;
+            self.system_stats.other_rate += (total_rate as f64 * 0.04) as u64;
+            
+            let total_bytes = process_info.sent + process_info.received;
+            self.system_stats.tcp_bytes += (total_bytes as f64 * 0.8) as u64;
+            self.system_stats.udp_bytes += (total_bytes as f64 * 0.15) as u64;
+            self.system_stats.icmp_bytes += (total_bytes as f64 * 0.01) as u64;
+            self.system_stats.other_bytes += (total_bytes as f64 * 0.04) as u64;
+            
+            // Estimate packet counts (rough average packet sizes)
+            // TCP: ~1400 bytes, UDP: ~512 bytes, ICMP: ~64 bytes, Other: ~800 bytes
+            self.system_stats.tcp_packets += (total_bytes as f64 * 0.8 / 1400.0) as u64;
+            self.system_stats.udp_packets += (total_bytes as f64 * 0.15 / 512.0) as u64;
+            self.system_stats.icmp_packets += (total_bytes as f64 * 0.01 / 64.0) as u64;
+            self.system_stats.other_packets += (total_bytes as f64 * 0.04 / 800.0) as u64;
+        }
+        
+        // Check if quota threshold is exceeded and update system alerts
+        let total_bytes = self.system_stats.total_bytes();
+        if total_bytes > self.total_quota_threshold {
+            if !self.threshold_exceeded {
+                self.threshold_exceeded = true;
+                self.threshold_exceeded_time = Some(std::time::Instant::now());
+            }
+            
+            // Check for system alerts that should trigger
+            for (pid, alert) in &self.alerts {
+                if let AlertAction::SystemAlert = alert.action {
+                    if let Some(process_info) = self.stats.get(pid) {
+                        let process_bytes = process_info.sent + process_info.received;
+                        if process_bytes > alert.threshold_bytes {
+                            self.system_alerts.insert(*pid);
+                        }
+                    }
+                }
+            }
+        } else {
+            // Reset threshold exceeded state if we're below 80% of quota
+            if total_bytes <= (self.total_quota_threshold as f64 * 0.8) as u64 {
+                self.threshold_exceeded = false;
+                self.threshold_exceeded_time = None;
+            }
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum AlertAction {
     Kill,
     CustomCommand(String),
+    SystemAlert, // New system-wide alert that just blinks/highlights
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -219,4 +302,45 @@ pub struct Alert {
     pub process_pid: i32,
     pub threshold_bytes: u64,
     pub action: AlertAction,
+}
+
+#[derive(Clone)]
+pub struct SystemStats {
+    pub tcp_bytes: u64,
+    pub tcp_rate: u64,
+    pub tcp_packets: u64,
+    pub udp_bytes: u64,
+    pub udp_rate: u64,
+    pub udp_packets: u64,
+    pub icmp_bytes: u64,
+    pub icmp_rate: u64,
+    pub icmp_packets: u64,
+    pub other_bytes: u64,
+    pub other_rate: u64,
+    pub other_packets: u64,
+}
+
+impl SystemStats {
+    pub fn new() -> Self {
+        SystemStats {
+            tcp_bytes: 0,
+            tcp_rate: 0,
+            tcp_packets: 0,
+            udp_bytes: 0,
+            udp_rate: 0,
+            udp_packets: 0,
+            icmp_bytes: 0,
+            icmp_rate: 0,
+            icmp_packets: 0,
+            other_bytes: 0,
+            other_rate: 0,
+            other_packets: 0,
+        }
+    }
+
+    pub fn total_bytes(&self) -> u64 {
+        self.tcp_bytes + self.udp_bytes + self.icmp_bytes + self.other_bytes
+    }
+
+
 }

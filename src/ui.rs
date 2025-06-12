@@ -1,7 +1,7 @@
 use std::io;
 use ratatui::{
     backend::CrosstermBackend,
-    widgets::{Block, Borders, Paragraph, Table, Row, Cell, Chart, Dataset, Axis, GraphType, TableState},
+    widgets::{Block, Borders, Paragraph, Table, Row, Cell, Chart, Dataset, Axis, GraphType, TableState, Gauge, BarChart, Bar, BarGroup},
     layout::{Layout, Constraint, Direction},
     style::{Style, Color, Modifier},
     text::{Line, Span, Text},
@@ -94,6 +94,7 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
                 }
             }
             AppMode::EditingAlert => render_editing_alert_mode(f, app),
+            AppMode::SystemOverview => render_system_overview_mode(f, app),
         }
     })?;
     Ok(())
@@ -293,9 +294,9 @@ fn render_normal_mode(f: &mut Frame, app: &App) {
         f.render_widget(alert_message, main_chunks[3]);
     } else {
         let footer_text = if app.containers_mode {
-            "q: quit | b: bandwidth | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
+            "q: quit | o: overview | b: bandwidth | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
         } else {
-            "q: quit | b: bandwidth | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
+            "q: quit | o: overview | b: bandwidth | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
         };
         let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::ALL));
         f.render_widget(footer, main_chunks[3]);
@@ -461,7 +462,7 @@ fn render_editing_alert_mode(f: &mut Frame, app: &App) {
         }
     }
 
-    let actions = vec!["Kill Process", "Custom Command"];
+    let actions = vec!["Kill Process", "Custom Command", "Alert"];
     let action_lines: Vec<Line> = actions
         .iter()
         .enumerate()
@@ -634,6 +635,285 @@ fn render_bandwidth_mode(f: &mut Frame, app: &App) {
     }
 }
 
+fn render_system_overview_mode(f: &mut Frame, app: &App) {
+    // Main layout: Title + 3 sections
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .margin(1)
+        .constraints([
+            Constraint::Length(3),  // Title
+            Constraint::Min(0),     // Main dashboard area
+            Constraint::Length(9),  // Alert progress bars section (taller)
+            Constraint::Length(3),  // Footer
+        ])
+        .split(f.size());
+
+    // Title with current settings
+    let title_text = format!(
+        "System Overview Dashboard | Data Quota: {} | +/-: adjust | r: reset",
+        format_bytes(app.total_quota_threshold)
+    );
+    let title = Block::default().title(title_text).borders(Borders::ALL);
+    f.render_widget(title, main_chunks[0]);
+
+    // Split main area vertically: gauge on top, rest below
+    let dashboard_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4),  // Bandwidth gauge on top
+            Constraint::Min(0),     // Rest below
+        ])
+        .split(main_chunks[1]);
+        
+    // Split bottom area horizontally: protocol+breakdown box and system info box
+    let bottom_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(75),  // Protocol box gets more space
+            Constraint::Percentage(25),  // System info smaller, rightmost
+        ])
+        .split(dashboard_chunks[1]);
+
+    // Draw outer block for protocol distribution/breakdown
+    let proto_block = Block::default().title("Protocol Distribution").borders(Borders::ALL);
+    // Calculate inner area before moving proto_block
+    let proto_inner = proto_block.inner(bottom_chunks[0]);
+    f.render_widget(proto_block, bottom_chunks[0]);
+
+    // Split inner area horizontally: chart left, legend right (legend appears top-right)
+    let protocol_chunks = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(70), // Chart area
+            Constraint::Percentage(30), // Legend area on right
+        ])
+        .split(proto_inner);
+
+    // Calculate system totals - TOTAL bandwidth since program start
+    let (total_sent, total_received, total_sent_rate, total_received_rate) = app.totals();
+    let total_bandwidth = total_sent + total_received;
+    let total_rate = total_sent_rate + total_received_rate;
+    
+    // Use quota threshold for display
+    let quota_ratio = (total_bandwidth as f64 / app.total_quota_threshold as f64).min(1.0);
+    
+    // Check if quota is exceeded
+    let quota_exceeded = total_bandwidth > app.total_quota_threshold;
+    
+    // 1. Total Data Usage Gauge (top section)
+    let gauge_color = if quota_exceeded {
+        // Blink effect - alternate between red and yellow
+        if std::time::Instant::now().elapsed().as_millis() % 1000 < 500 {
+            Color::Red
+        } else {
+            Color::Yellow
+        }
+    } else if total_bandwidth > (app.total_quota_threshold as f64 * 0.8) as u64 {
+        Color::Yellow
+    } else {
+        Color::Green
+    };
+
+    let bandwidth_gauge = Gauge::default()
+        .block(Block::default().title("Total Data Usage Since Start").borders(Borders::ALL))
+        .gauge_style(Style::default().fg(gauge_color).bg(Color::Black))
+        .percent((quota_ratio * 100.0) as u16)
+        .label(format!(
+            "Used: {} | Rate: {}/s | Quota: {}", 
+            format_bytes(total_bandwidth),
+            format_bytes(total_rate),
+            format_bytes(app.total_quota_threshold)
+        ));
+    f.render_widget(bandwidth_gauge, dashboard_chunks[0]);
+
+    // 2. Protocol Distribution Bar Chart (top part of protocol area)
+    let protocol_data = if total_rate > 0 {
+        vec![
+            ("TCP", app.system_stats.tcp_rate),
+            ("UDP", app.system_stats.udp_rate),
+            ("ICMP", app.system_stats.icmp_rate),
+            ("Other", app.system_stats.other_rate),
+        ]
+    } else {
+        vec![("No data", 0)]
+    };
+
+    let max_protocol_rate = protocol_data.iter().map(|(_, rate)| *rate).max().unwrap_or(1);
+    
+    // Build colored bars without value numbers
+    let bars: Vec<Bar<'_>> = vec![
+        Bar::default()
+            .value(app.system_stats.tcp_rate)
+            .label("TCP".into())
+            .text_value(String::new()) // hide numeric value
+            .style(Style::default().fg(Color::Red)),
+        Bar::default()
+            .value(app.system_stats.udp_rate)
+            .label("UDP".into())
+            .text_value(String::new())
+            .style(Style::default().fg(Color::Green)),
+        Bar::default()
+            .value(app.system_stats.icmp_rate)
+            .label("ICMP".into())
+            .text_value(String::new())
+            .style(Style::default().fg(Color::Yellow)),
+        Bar::default()
+            .value(app.system_stats.other_rate)
+            .label("Other".into())
+            .text_value(String::new())
+            .style(Style::default().fg(Color::Magenta)),
+    ];
+
+    let bar_group = BarGroup::default().bars(&bars);
+
+    let protocol_chart = BarChart::default()
+        .data(bar_group)
+        .bar_width(12)
+        .bar_gap(2)
+        .max(max_protocol_rate)
+        .value_style(Style::default().fg(Color::Black)) // Hidden
+        .label_style(Style::default().fg(Color::White));
+    f.render_widget(protocol_chart, protocol_chunks[0]);
+    
+    // 3. Protocol Breakdown Table (right part of protocol area)
+    let protocol_rows: Vec<Row> = vec![
+        Row::new(vec![
+            Cell::from(Span::styled("■ TCP", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))),
+            Cell::from(format_bytes(app.system_stats.tcp_rate)),
+            Cell::from(app.system_stats.tcp_packets.to_string()),
+            Cell::from(format!("{:.1}%", if total_rate > 0 { (app.system_stats.tcp_rate as f64 / total_rate as f64) * 100.0 } else { 0.0 })),
+        ]),
+        Row::new(vec![
+            Cell::from(Span::styled("■ UDP", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))),
+            Cell::from(format_bytes(app.system_stats.udp_rate)),
+            Cell::from(app.system_stats.udp_packets.to_string()),
+            Cell::from(format!("{:.1}%", if total_rate > 0 { (app.system_stats.udp_rate as f64 / total_rate as f64) * 100.0 } else { 0.0 })),
+        ]),
+        Row::new(vec![
+            Cell::from(Span::styled("■ ICMP", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
+            Cell::from(format_bytes(app.system_stats.icmp_rate)),
+            Cell::from(app.system_stats.icmp_packets.to_string()),
+            Cell::from(format!("{:.1}%", if total_rate > 0 { (app.system_stats.icmp_rate as f64 / total_rate as f64) * 100.0 } else { 0.0 })),
+        ]),
+        Row::new(vec![
+            Cell::from(Span::styled("■ Other", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))),
+            Cell::from(format_bytes(app.system_stats.other_rate)),
+            Cell::from(app.system_stats.other_packets.to_string()),
+            Cell::from(format!("{:.1}%", if total_rate > 0 { (app.system_stats.other_rate as f64 / total_rate as f64) * 100.0 } else { 0.0 })),
+        ]),
+    ];
+
+    let protocol_table = Table::new(
+        protocol_rows,
+        [
+            Constraint::Length(8),  // Protocol name
+            Constraint::Length(10), // Rate
+            Constraint::Length(8),  // Packets
+            Constraint::Length(6),  // Percentage
+        ]
+    )
+    .header(Row::new(vec!["Proto", "Rate/s", "Packets", "%"]).style(Style::default().add_modifier(Modifier::BOLD)))
+    .style(Style::default().fg(Color::White));
+    
+    f.render_widget(protocol_table, protocol_chunks[1]);
+
+    // 4. System Information (right section)
+    let uptime = app.start_time.elapsed();
+    let uptime_text = format!("{}h {}m {}s", 
+        uptime.as_secs() / 3600,
+        (uptime.as_secs() % 3600) / 60,
+        uptime.as_secs() % 60);
+    
+    let process_count = app.stats.len();
+    let active_alerts = app.alerts.len();
+    
+    let threshold_status = if quota_exceeded { "QUOTA EXCEEDED!" } else { "Normal" };
+    let threshold_color = if quota_exceeded { Color::Red } else { Color::Green };
+    
+    let info_text = vec![
+        Line::from(format!("Uptime: {}", uptime_text)),
+        Line::from(format!("Active Processes: {}", process_count)),
+        Line::from(format!("Alert Rules: {}", active_alerts)),
+        Line::from(vec![
+            Span::raw("Quota Status: "),
+            Span::styled(threshold_status, Style::default().fg(threshold_color).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(""),
+        Line::from("Controls:"),
+        Line::from("  +/-: Adjust quota (±100MB)"),
+        Line::from("  r: Reset exceeded state"),
+        Line::from("  Esc: Return to main"),
+        Line::from(""),
+        Line::from("Note:"),
+        Line::from("  Alert action will cause"),
+        Line::from("  processes to blink red"),
+        Line::from("  in the main view when"),
+        Line::from("  their thresholds are"),
+        Line::from("  exceeded."),
+    ];
+
+    let info_paragraph = Paragraph::new(Text::from(info_text))
+        .block(Block::default().title("System Info & Controls").borders(Borders::ALL));
+    f.render_widget(info_paragraph, bottom_chunks[1]);
+
+    // 5. Alert Progress Bars Section
+    if !app.alerts.is_empty() {
+        let alert_items: Vec<Line> = app.alerts.iter()
+            .filter_map(|(pid, alert)| {
+                if let Some(process_info) = app.stats.get(pid) {
+                    let current_usage = process_info.sent + process_info.received;
+                    let progress = (current_usage as f64 / alert.threshold_bytes as f64).min(1.0);
+                    let progress_percent = (progress * 100.0) as usize;
+                    
+                    let bar_length = 20;
+                    let filled = (progress * bar_length as f64) as usize;
+                    let bar = "█".repeat(filled) + &"░".repeat(bar_length - filled);
+                    
+                    // Color (with blink when exceeded)
+                    let color = if progress >= 1.0 {
+                        // Blink red/yellow
+                        if std::time::Instant::now().elapsed().as_millis() % 1000 < 500 {
+                            Color::Red
+                        } else {
+                            Color::Yellow
+                        }
+                    } else if progress > 0.9 {
+                        Color::Red
+                    } else if progress > 0.7 {
+                        Color::Yellow
+                    } else {
+                        Color::Green
+                    };
+
+                    Some(Line::from(vec![
+                        Span::raw(format!("{}: ", process_info.name)),
+                        Span::styled(format!("[{}] {}% ", bar, progress_percent), Style::default().fg(color)),
+                        Span::raw(format!("({})", format_bytes(current_usage))),
+                    ]))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !alert_items.is_empty() {
+            let alert_paragraph = Paragraph::new(Text::from(alert_items))
+                .block(Block::default().title("Alert Thresholds").borders(Borders::ALL));
+            f.render_widget(alert_paragraph, main_chunks[2]);
+        }
+    } else {
+        let no_alerts = Paragraph::new("No alert thresholds configured")
+            .block(Block::default().title("Alert Thresholds").borders(Borders::ALL));
+        f.render_widget(no_alerts, main_chunks[2]);
+    }
+
+    // Footer
+    let footer_text = "q: quit | +/-: threshold | r: reset | Esc: return to main | System alerts will blink in main view";
+    let footer = Paragraph::new(footer_text)
+        .block(Block::default().borders(Borders::ALL));
+    f.render_widget(footer, main_chunks[3]);
+}
+
 pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
     match app.mode {
         AppMode::EditingAlert => {
@@ -661,7 +941,7 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                     }
                 }
                 KeyCode::Down => {
-                    if app.selected_alert_action < 1 {
+                    if app.selected_alert_action < 2 {
                         app.selected_alert_action += 1;
                     }
                 }
@@ -688,15 +968,24 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                                     (threshold, AlertAction::CustomCommand(command))
                                 }
                             },
+                            2 => {
+                                // Alert - just parse threshold
+                                (parse_input_to_bytes(&app.alert_input), AlertAction::SystemAlert)
+                            },
                             _ => (1024 * 1024, AlertAction::Kill),
                         };
                         
                         let new_alert = Alert {
                             process_pid: pid,
                             threshold_bytes: threshold,
-                            action,
+                            action: action.clone(),
                         };
                         app.alerts.insert(pid, new_alert);
+                        
+                        // Add to system alerts if it's a system alert
+                        if let AlertAction::SystemAlert = action {
+                            app.system_alerts.insert(pid);
+                        }
                     }
                     app.mode = AppMode::Normal;
                     app.alert_input.clear();
@@ -708,10 +997,10 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
         }
         AppMode::Normal => {
             if app.show_action_panel {
-                let mut num_actions = 2;
+                let mut num_actions = 2; // Kill, Edit
                 if let Some(pid) = app.selected_process {
                     if app.alerts.contains_key(&pid) {
-                        num_actions = 3;
+                        num_actions = 3; // Add Remove option
                     }
                 }
 
@@ -762,6 +1051,10 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                                                 app.command_input = cmd.clone();
                                                 1
                                             },
+                                            AlertAction::SystemAlert => {
+                                                app.alert_input = format_bytes(alert.threshold_bytes);
+                                                2
+                                            },
                                         };
                                     } else {
                                         app.alert_input.clear();
@@ -771,6 +1064,7 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                                 }
                                 "Remove" => {
                                     app.alerts.remove(&pid);
+                                    app.system_alerts.remove(&pid);
                                 }
                                 _ => {}
                             }
@@ -821,6 +1115,9 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                             };
                         }
                     }
+                    KeyCode::Char('o') => {
+                        app.mode = AppMode::SystemOverview;
+                    }
                     KeyCode::Down => {
                         let sorted_pids: Vec<i32> = app.sorted_stats().iter().map(|(pid, _)| **pid).collect();
                         if let Some(current_pid) = app.selected_process {
@@ -853,6 +1150,31 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                     }
                     _ => {}
                 }
+            }
+        }
+        AppMode::SystemOverview => {
+            match key {
+                KeyCode::Char('q') => return true,
+                KeyCode::Esc => {
+                    app.mode = AppMode::Normal;
+                }
+                KeyCode::Char('r') => {
+                    // Reset threshold exceeded state
+                    app.threshold_exceeded = false;
+                    app.threshold_exceeded_time = None;
+                }
+
+                KeyCode::Char('+') | KeyCode::Char('=') => {
+                    // Increase quota by 100MB
+                    app.total_quota_threshold += 100 * 1024 * 1024;
+                }
+                KeyCode::Char('-') => {
+                    // Decrease quota by 100MB (min 100MB)
+                    if app.total_quota_threshold > 100 * 1024 * 1024 {
+                        app.total_quota_threshold -= 100 * 1024 * 1024;
+                    }
+                }
+                _ => {}
             }
         }
     }

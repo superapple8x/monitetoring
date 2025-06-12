@@ -69,6 +69,10 @@ fn show_interface_help() {
 
 fn execute_alert_action(action: &AlertAction, pid: i32, name: &str) -> (bool, Option<String>) {
     match action {
+        AlertAction::SystemAlert => {
+            // Just return a notification message, no process killing
+            (false, Some(format!("🚨 System Alert: {} (PID {}) exceeded bandwidth threshold", name, pid)))
+        }
         AlertAction::Kill => {
             // First, send the kill signal
             match signal::kill(Pid::from_raw(pid), Signal::SIGKILL) {
@@ -392,6 +396,9 @@ async fn main() -> Result<(), io::Error> {
                 
                 // Remove killed processes from the stats entirely
                 app.stats.retain(|pid, _| !app.killed_processes.contains(pid));
+                
+                // Update system overview statistics
+                app.update_system_stats();
             }
 
             // Check for triggered alerts (with cooldown)
