@@ -16,6 +16,7 @@ use std::io;
 use std::thread;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
+use nix::errno::Errno;
 
 use config::{Cli, reset_config, load_config};
 use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction};
@@ -69,11 +70,43 @@ fn show_interface_help() {
 fn execute_alert_action(action: &AlertAction, pid: i32, name: &str) -> (bool, Option<String>) {
     match action {
         AlertAction::Kill => {
-            if let Ok(_) = signal::kill(Pid::from_raw(pid), Signal::SIGKILL) {
-                (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)))
-            } else {
-                (false, Some(format!("❌ Failed to kill {} (PID {})", name, pid)))
+            // First, send the kill signal
+            match signal::kill(Pid::from_raw(pid), Signal::SIGKILL) {
+                Ok(_) => {
+                    // Signal sent, now verify process termination
+                }
+                Err(e) if e == Errno::ESRCH => {
+                    // Process already doesn't exist, which is a success in this context
+                    return (true, Some(format!("💀 Process {} (PID {}) was already gone", name, pid)));
+                }
+                Err(e) => {
+                    // Another error, like permissions
+                    return (false, Some(format!("❌ Failed to send kill signal to {} (PID {}): {}", name, pid, e)));
+                }
             }
+
+            // Poll for up to 2 seconds to see if the process terminates
+            let start = Instant::now();
+            while start.elapsed() < Duration::from_secs(2) {
+                // Check if process exists by sending signal 0
+                match signal::kill(Pid::from_raw(pid), None) {
+                    Ok(_) => {
+                        // Process still exists, wait a bit
+                        thread::sleep(Duration::from_millis(100));
+                    }
+                    Err(e) if e == Errno::ESRCH => {
+                        // Process does not exist, success!
+                        return (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)));
+                    }
+                    Err(_) => {
+                        // Some other error, assume failure to check
+                        break;
+                    }
+                }
+            }
+
+            // If the loop finishes and we haven't returned, the process is still alive
+            (false, Some(format!("❌ Failed to kill {} (PID {}): Process still running", name, pid)))
         }
         AlertAction::CustomCommand(cmd) => {
             eprintln!("🔧 Executing custom command for {} (PID {}): {}", name, pid, cmd);
@@ -355,10 +388,7 @@ async fn main() -> Result<(), io::Error> {
                             if was_killed {
                                 processes_to_kill.push(*pid);
                             }
-                            // Show message in stderr so user can see what happened
-                            if let Some(msg) = message {
-                                eprintln!("{}", msg);
-                            }
+                            app.last_alert_message = message;
                             // Set cooldown
                             app.alert_cooldowns.insert(*pid, now);
                         }

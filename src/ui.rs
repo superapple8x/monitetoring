@@ -13,7 +13,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use crate::types::{Alert, AlertAction, App, AppMode, SortColumn, SortDirection};
+use crate::types::{Alert, AlertAction, App, AppMode, SortColumn, SortDirection, EditingField};
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 
@@ -101,7 +101,7 @@ fn render_normal_mode(f: &mut Frame, app: &App) {
                 Constraint::Length(3), // Title
                 Constraint::Min(0),    // Main content (Table + Action Panel)
                 Constraint::Length(3), // Totals
-                Constraint::Length(3), // Footer
+                Constraint::Length(3), // Footer / Alert Message
             ]
             .as_ref(),
         )
@@ -253,13 +253,20 @@ fn render_normal_mode(f: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::ALL).title("Network Totals"));
     f.render_widget(totals, main_chunks[2]);
 
-    let footer_text = if app.containers_mode {
-        "q: quit | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
+    if let Some(msg) = &app.last_alert_message {
+        let alert_message = Paragraph::new(msg.as_str())
+            .style(Style::default().fg(Color::Yellow))
+            .block(Block::default().borders(Borders::ALL).title("Last Alert"));
+        f.render_widget(alert_message, main_chunks[3]);
     } else {
-        "q: quit | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
-    };
-    let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::ALL));
-    f.render_widget(footer, main_chunks[3]);
+        let footer_text = if app.containers_mode {
+            "q: quit | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
+        } else {
+            "q: quit | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
+        };
+        let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::ALL));
+        f.render_widget(footer, main_chunks[3]);
+    }
 }
 
 fn render_editing_alert_mode(f: &mut Frame, app: &App) {
@@ -269,7 +276,8 @@ fn render_editing_alert_mode(f: &mut Frame, app: &App) {
         .constraints(
             [
                 Constraint::Length(3), // Title
-                Constraint::Length(3), // Input (threshold or command)
+                Constraint::Length(3), // Threshold Input
+                Constraint::Length(3), // Command Input
                 Constraint::Min(0),    // Actions
             ]
             .as_ref(),
@@ -285,18 +293,35 @@ fn render_editing_alert_mode(f: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::ALL).title("Alert Editor (Esc to cancel, Enter to save)"));
     f.render_widget(title, chunks[0]);
 
-    // Input field - changes based on selected action
-    let (input_title, input_text) = if app.selected_alert_action == 0 {
-        ("Threshold (e.g., 10MB, 2GB)", app.alert_input.as_str())
-    } else {
-        ("Format: threshold,command (e.g., 10MB,shutdown)", app.alert_input.as_str())
-    };
-    
-    let input = Paragraph::new(input_text)
+    // Threshold Input
+    let threshold_input = Paragraph::new(app.alert_input.as_str())
         .style(Style::default().fg(Color::Yellow))
-        .block(Block::default().borders(Borders::ALL).title(input_title));
-    f.render_widget(input, chunks[1]);
-    f.set_cursor(chunks[1].x + input_text.len() as u16 + 1, chunks[1].y + 1);
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Threshold (e.g., 10MB, 2GB)")
+        );
+    f.render_widget(threshold_input, chunks[1]);
+
+    // Command Input
+    let command_input = Paragraph::new(app.command_input.as_str())
+        .style(Style::default().fg(Color::Yellow))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Command (leave empty to kill process)")
+        );
+    f.render_widget(command_input, chunks[2]);
+
+    // Set cursor based on the currently editing field
+    match app.current_editing_field {
+        EditingField::Threshold => {
+            f.set_cursor(chunks[1].x + app.alert_input.len() as u16 + 1, chunks[1].y + 1);
+        }
+        EditingField::Command => {
+            f.set_cursor(chunks[2].x + app.command_input.len() as u16 + 1, chunks[2].y + 1);
+        }
+    }
 
     let actions = vec!["Kill Process", "Custom Command"];
     let action_lines: Vec<Line> = actions
@@ -315,8 +340,8 @@ fn render_editing_alert_mode(f: &mut Frame, app: &App) {
         .collect();
 
     let actions_widget = Paragraph::new(Text::from(action_lines))
-        .block(Block::default().borders(Borders::ALL).title("Action"));
-    f.render_widget(actions_widget, chunks[2]);
+        .block(Block::default().borders(Borders::ALL).title("Action (use Tab to switch fields)"));
+    f.render_widget(actions_widget, chunks[3]);
 }
 
 pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
@@ -324,10 +349,16 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
         AppMode::EditingAlert => {
             match key {
                 KeyCode::Char(c) => {
-                    app.alert_input.push(c);
+                    match app.current_editing_field {
+                        EditingField::Threshold => app.alert_input.push(c),
+                        EditingField::Command => app.command_input.push(c),
+                    }
                 }
                 KeyCode::Backspace => {
-                    app.alert_input.pop();
+                    match app.current_editing_field {
+                        EditingField::Threshold => { app.alert_input.pop(); },
+                        EditingField::Command => { app.command_input.pop(); },
+                    }
                 }
                 KeyCode::Esc => {
                     app.mode = AppMode::Normal;
@@ -344,6 +375,12 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                         app.selected_alert_action += 1;
                     }
                 }
+                KeyCode::Tab => {
+                    app.current_editing_field = match app.current_editing_field {
+                        EditingField::Threshold => EditingField::Command,
+                        EditingField::Command => EditingField::Threshold,
+                    };
+                }
                 KeyCode::Enter => {
                     if let Some(pid) = app.selected_process {
                         let (threshold, action) = match app.selected_alert_action {
@@ -353,16 +390,11 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                             },
                             1 => {
                                 // Custom Command - parse "threshold,command" format
-                                if let Some(comma_pos) = app.alert_input.find(',') {
-                                    let threshold_str = &app.alert_input[..comma_pos];
-                                    let command_str = &app.alert_input[comma_pos + 1..];
-                                    let threshold = parse_input_to_bytes(threshold_str);
-                                    let command = command_str.trim().to_string();
-                                    (threshold, AlertAction::CustomCommand(command))
+                                let threshold = parse_input_to_bytes(&app.alert_input);
+                                let command = app.command_input.trim().to_string();
+                                if command.is_empty() {
+                                    (threshold, AlertAction::Kill)
                                 } else {
-                                    // No comma found, treat whole input as command with default threshold
-                                    let command = app.alert_input.trim().to_string();
-                                    let threshold = 1024 * 1024; // 1MB default
                                     (threshold, AlertAction::CustomCommand(command))
                                 }
                             },
@@ -436,7 +468,8 @@ pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
                                                 0
                                             },
                                             AlertAction::CustomCommand(cmd) => {
-                                                app.alert_input = format!("{},{}", format_bytes(alert.threshold_bytes), cmd);
+                                                app.alert_input = format_bytes(alert.threshold_bytes);
+                                                app.command_input = cmd.clone();
                                                 1
                                             },
                                         };

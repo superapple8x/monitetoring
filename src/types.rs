@@ -99,6 +99,11 @@ pub enum AppMode {
     EditingAlert,
 }
 
+pub enum EditingField {
+    Threshold,
+    Command,
+}
+
 pub struct App {
     pub stats: HashMap<i32, ProcessInfo>,
     pub sort_by: SortColumn,
@@ -112,8 +117,10 @@ pub struct App {
     pub alert_input: String,
     pub command_input: String,
     pub selected_alert_action: usize,
+    pub current_editing_field: EditingField,
     pub killed_processes: HashSet<i32>,
     pub alert_cooldowns: HashMap<i32, Instant>,
+    pub last_alert_message: Option<String>,
 }
 
 impl App {
@@ -131,8 +138,10 @@ impl App {
             alert_input: String::new(),
             command_input: String::new(),
             selected_alert_action: 0,
+            current_editing_field: EditingField::Threshold,
             killed_processes: HashSet::new(),
             alert_cooldowns: HashMap::new(),
+            last_alert_message: None,
         }
     }
 
