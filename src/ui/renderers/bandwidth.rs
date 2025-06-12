@@ -16,10 +16,10 @@ pub fn render(f: &mut Frame, app: &App) {
         .constraints(
             [
                 Constraint::Length(3),               // Title
-                Constraint::Percentage(70),          // Chart
+                Constraint::Percentage(60),          // Chart (reduced from 70% to make room)
                 Constraint::Min(0),                  // Table
                 Constraint::Length(3),               // Totals
-                Constraint::Length(3),               // Footer / Alert
+                Constraint::Length(6),               // Footer / Alert (more space for dual messages)
             ]
             .as_ref(),
         )
@@ -34,9 +34,9 @@ pub fn render(f: &mut Frame, app: &App) {
 
 /// Render the title bar for bandwidth mode
 fn render_title(f: &mut Frame, area: ratatui::layout::Rect) {
-    let title = Block::default()
-        .title("Monitetoring – Bandwidth View (Press 'b' to close)")
-        .borders(Borders::ALL);
+    let navigation_text = "q: quit | b: toggle view | t: chart type | ↑/↓: select | Enter: actions";
+    let title = Paragraph::new(navigation_text)
+        .block(Block::default().title("Monitetoring – Bandwidth View").borders(Borders::ALL));
     f.render_widget(title, area);
 }
 
@@ -203,14 +203,8 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             .block(Block::default().borders(Borders::ALL).title("Command Execution"));
         f.render_widget(execution_message, area);
     } else {
-        // Default footer text
-        let footer_text = if app.bandwidth_mode && app.chart_type == ChartType::SystemStacked {
-            "q: quit | b: toggle view | t: chart type | m: metrics | ↑/↓: select | Enter: actions"
-        } else {
-            "q: quit | b: toggle view | t: chart type | ↑/↓: select | Enter: actions"
-        };
-        let footer = Paragraph::new(footer_text)
-            .block(Block::default().borders(Borders::ALL));
+        // Default footer text - navigation is now in header
+        let footer = Paragraph::new("No Action Executed").block(Block::default().borders(Borders::ALL));
         f.render_widget(footer, area);
     }
 } 

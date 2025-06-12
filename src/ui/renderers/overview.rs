@@ -248,13 +248,7 @@ fn render_system_info(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         Line::from("  +/-: Adjust quota (±100MB)"),
         Line::from("  r: Reset exceeded state"),
         Line::from("  Esc: Return to main"),
-        Line::from(""),
-        Line::from("Note:"),
-        Line::from("  Alert action will cause"),
-        Line::from("  processes to blink red"),
-        Line::from("  in the main view when"),
-        Line::from("  their thresholds are"),
-        Line::from("  exceeded."),
+
     ];
 
     let info_paragraph = Paragraph::new(Text::from(info_text))
@@ -317,7 +311,7 @@ fn render_alert_progress(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 
 /// Render the footer
 fn render_footer(f: &mut Frame, area: ratatui::layout::Rect) {
-    let footer_text = "q: quit | +/-: threshold | r: reset | Esc: return to main | System alerts will blink in main view";
+    let footer_text = "q: quit | +/-: threshold | r: reset | Esc: return to main";
     let footer = Paragraph::new(footer_text)
         .block(Block::default().borders(Borders::ALL));
     f.render_widget(footer, area);

@@ -473,20 +473,26 @@ async fn main() -> Result<(), io::Error> {
                         };
                         
                         if should_trigger {
-                            let (was_killed, message, log_entry) = execute_alert_action(&alert.action, *pid, &stats.name, stats.sent, stats.received, alert.threshold_bytes);
-                            if was_killed {
-                                processes_to_kill.push(*pid);
-                            }
-                            app.last_alert_message = message;
-                            
-                            // Add execution log entry if available
-                            if let Some(log_msg) = log_entry {
-                                app.command_execution_log.push((now, log_msg));
+                            // For custom commands, add execution log entry immediately before execution
+                            if let AlertAction::CustomCommand(cmd) = &alert.action {
+                                let total_usage = stats.sent + stats.received;
+                                let execution_log_entry = format!(
+                                    "🔧 Executing custom command for {} (PID {}): {} | Usage: {} ({}% over threshold)",
+                                    &stats.name, *pid, cmd, format_bytes(total_usage),
+                                    ((total_usage as f64 / alert.threshold_bytes as f64 - 1.0) * 100.0) as u32
+                                );
+                                app.command_execution_log.push((now, execution_log_entry));
                                 // Keep only the last 50 log entries to prevent unbounded growth
                                 if app.command_execution_log.len() > 50 {
                                     app.command_execution_log.remove(0);
                                 }
                             }
+                            
+                            let (was_killed, message, _) = execute_alert_action(&alert.action, *pid, &stats.name, stats.sent, stats.received, alert.threshold_bytes);
+                            if was_killed {
+                                processes_to_kill.push(*pid);
+                            }
+                            app.last_alert_message = message;
                             
                             // Set cooldown
                             app.alert_cooldowns.insert(*pid, now);

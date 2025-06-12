@@ -18,13 +18,19 @@ pub fn render(f: &mut Frame, app: &App) {
                 Constraint::Length(3), // Title
                 Constraint::Min(0),    // Main content (Table + Action Panel)
                 Constraint::Length(3), // Totals
-                Constraint::Length(3), // Footer / Alert Message
+                Constraint::Length(6), // Footer / Alert Message (more space for dual messages)
             ]
             .as_ref(),
         )
         .split(f.size());
 
-    let title = Block::default().title("Monitetoring").borders(Borders::ALL);
+    let navigation_text = if app.containers_mode {
+        "q: quit | o: overview | b: bandwidth | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
+    } else {
+        "q: quit | o: overview | b: bandwidth | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
+    };
+    let title = Paragraph::new(navigation_text)
+        .block(Block::default().title("Monitetoring").borders(Borders::ALL));
     f.render_widget(title, main_chunks[0]);
 
     // When bandwidth_mode is inactive, use full width for table; otherwise split for potential side chart
@@ -265,13 +271,8 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             .block(Block::default().borders(Borders::ALL).title("Command Execution"));
         f.render_widget(execution_message, area);
     } else {
-        // Default footer text
-        let footer_text = if app.containers_mode {
-            "q: quit | o: overview | b: bandwidth | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
-        } else {
-            "q: quit | o: overview | b: bandwidth | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
-        };
-        let footer = Paragraph::new(footer_text).block(Block::default().borders(Borders::ALL));
+        // Default footer text - navigation is now in header
+        let footer = Paragraph::new("No Action Executed").block(Block::default().borders(Borders::ALL));
         f.render_widget(footer, area);
     }
 } 
