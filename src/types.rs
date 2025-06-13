@@ -154,6 +154,7 @@ pub struct App {
     pub threshold_exceeded: bool,
     pub threshold_exceeded_time: Option<Instant>,
     pub system_alerts: HashSet<i32>, // PIDs with system alerts that should blink
+    pub alert_scroll_offset: usize, // Scroll offset for alert progress bars
 }
 
 impl App {
@@ -190,6 +191,7 @@ impl App {
             threshold_exceeded: false,
             threshold_exceeded_time: None,
             system_alerts: HashSet::new(),
+            alert_scroll_offset: 0,
         }
     }
 

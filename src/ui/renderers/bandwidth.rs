@@ -39,7 +39,7 @@ fn render_system_stacked_view(f: &mut Frame, app: &App, terminal_height: u16) {
         )
         .split(f.size());
 
-    render_title(f, main_chunks[0], terminal_height);
+    render_title(f, main_chunks[0], terminal_height, app);
     render_charts(f, app, main_chunks[1]);
     render_top5_processes_table(f, app, main_chunks[2]);
     render_totals_bar(f, app, main_chunks[3]);
@@ -62,7 +62,7 @@ fn render_process_lines_view(f: &mut Frame, app: &App, terminal_height: u16) {
         )
         .split(f.size());
 
-    render_title(f, main_chunks[0], terminal_height);
+    render_title(f, main_chunks[0], terminal_height, app);
     render_charts(f, app, main_chunks[1]);
     render_compact_process_table(f, app, main_chunks[2]);
     render_totals_bar(f, app, main_chunks[3]);
@@ -95,13 +95,21 @@ fn calculate_responsive_layout(terminal_height: u16) -> (Constraint, u16) {
 }
 
 /// Render the title bar for bandwidth mode with adaptive messaging
-fn render_title(f: &mut Frame, area: ratatui::layout::Rect, terminal_height: u16) {
+fn render_title(f: &mut Frame, area: ratatui::layout::Rect, terminal_height: u16, app: &App) {
     let navigation_text = if terminal_height < 20 {
         // Compact navigation for very small terminals
-        "q:quit | Tab:mode | t:chart | ↑/↓:select"
+        if app.chart_type == ChartType::SystemStacked {
+            "q:quit | Tab:mode | t:chart | m:traffic"
+        } else {
+            "q:quit | Tab:mode | t:chart | ↑/↓:select"
+        }
     } else {
         // Full navigation text
-        "q: quit | Tab: switch mode | t: chart type | ↑/↓: select | Enter: actions"
+        if app.chart_type == ChartType::SystemStacked {
+            "q: quit | Tab: switch mode | t: chart type | m: traffic | Enter: actions"
+        } else {
+            "q: quit | Tab: switch mode | t: chart type | ↑/↓: select | Enter: actions"
+        }
     };
     
     let title_text = if terminal_height < 20 {

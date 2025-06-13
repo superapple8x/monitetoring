@@ -217,6 +217,14 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
             } else if app.mode == AppMode::Normal {
                 // Currently in normal mode, go to bandwidth
                 app.bandwidth_mode = true;
+                
+                // Auto-select first process if none selected (for ProcessLines chart)
+                if app.selected_process.is_none() && !app.stats.is_empty() {
+                    let sorted_pids: Vec<i32> = app.sorted_stats().iter().map(|(pid, _)| **pid).collect();
+                    if !sorted_pids.is_empty() {
+                        app.selected_process = Some(sorted_pids[0]);
+                    }
+                }
             }
         }
         KeyCode::Char('t') => {
@@ -297,6 +305,19 @@ fn handle_overview_mode_keys(app: &mut App, key: KeyCode) -> bool {
             // Decrease quota by 100MB (min 100MB)
             if app.total_quota_threshold > 100 * 1024 * 1024 {
                 app.total_quota_threshold -= 100 * 1024 * 1024;
+            }
+        }
+        KeyCode::Up => {
+            // Scroll up in alert list
+            if app.alert_scroll_offset > 0 {
+                app.alert_scroll_offset -= 1;
+            }
+        }
+        KeyCode::Down => {
+            // Scroll down in alert list
+            let max_scroll = app.alerts.len().saturating_sub(1);
+            if app.alert_scroll_offset < max_scroll {
+                app.alert_scroll_offset += 1;
             }
         }
         _ => {}

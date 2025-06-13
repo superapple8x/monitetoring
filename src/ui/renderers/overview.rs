@@ -1,5 +1,5 @@
 use ratatui::{
-    widgets::{Block, Borders, Paragraph, Table, Row, Cell, Gauge, BarChart, Bar, BarGroup},
+    widgets::{Block, Borders, Paragraph, Table, Row, Cell, Gauge, BarChart, Bar, BarGroup, List, ListItem, ListState},
     layout::{Layout, Constraint, Direction},
     style::{Style, Color, Modifier},
     text::{Line, Span, Text},
@@ -250,10 +250,10 @@ fn render_system_info(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     f.render_widget(info_paragraph, area);
 }
 
-/// Render alert progress bars section
+/// Render alert progress bars section (scrollable)
 fn render_alert_progress(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     if !app.alerts.is_empty() {
-        let alert_items: Vec<Line> = app.alerts.iter()
+        let alert_items: Vec<ListItem> = app.alerts.iter()
             .filter_map(|(pid, alert)| {
                 if let Some(process_info) = app.stats.get(pid) {
                     let current_usage = process_info.sent + process_info.received;
@@ -287,10 +287,10 @@ fn render_alert_progress(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
                         process_info.name.clone()
                     };
 
-                    Some(Line::from(vec![
+                    Some(ListItem::new(Line::from(vec![
                         Span::raw(format!("{:12} ", name)), // Fixed width for alignment
                         Span::styled(format!("[{}] {:3}%", bar, progress_percent), Style::default().fg(color)),
-                    ]))
+                    ])))
                 } else {
                     None
                 }
@@ -298,9 +298,15 @@ fn render_alert_progress(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
             .collect();
 
         if !alert_items.is_empty() {
-            let alert_paragraph = Paragraph::new(Text::from(alert_items))
-                .block(Block::default().title("Alert Thresholds").borders(Borders::ALL));
-            f.render_widget(alert_paragraph, area);
+            let alert_count = alert_items.len();
+            let alert_list = List::new(alert_items)
+                .block(Block::default().title(format!("Alert Thresholds ({})", alert_count)).borders(Borders::ALL));
+            
+            // Create a mutable list state for scrolling
+            let mut list_state = ListState::default();
+            list_state.select(Some(app.alert_scroll_offset));
+            
+            f.render_stateful_widget(alert_list, area, &mut list_state);
         }
     } else {
         let no_alerts = Paragraph::new("No alert thresholds configured")
