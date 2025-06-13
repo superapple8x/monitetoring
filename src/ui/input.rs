@@ -205,8 +205,19 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
                 SortDirection::Asc
             };
         }
-        KeyCode::Char('b') => {
-            app.bandwidth_mode = !app.bandwidth_mode;
+        KeyCode::Tab => {
+            // Cycle through modes: Main -> Bandwidth -> Overview -> Main
+            if app.mode == AppMode::SystemOverview {
+                // Currently in overview mode, go back to normal
+                app.mode = AppMode::Normal;
+            } else if app.bandwidth_mode {
+                // Currently in bandwidth mode, go to overview
+                app.mode = AppMode::SystemOverview;
+                app.bandwidth_mode = false;
+            } else if app.mode == AppMode::Normal {
+                // Currently in normal mode, go to bandwidth
+                app.bandwidth_mode = true;
+            }
         }
         KeyCode::Char('t') => {
             // Toggle chart type only when in bandwidth mode
@@ -226,9 +237,6 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
                     MetricsMode::ReceiveOnly => MetricsMode::Combined,
                 };
             }
-        }
-        KeyCode::Char('o') => {
-            app.mode = AppMode::SystemOverview;
         }
         KeyCode::Down => {
             let sorted_pids: Vec<i32> = app.sorted_stats().iter().map(|(pid, _)| **pid).collect();
@@ -270,6 +278,10 @@ fn handle_overview_mode_keys(app: &mut App, key: KeyCode) -> bool {
     match key {
         KeyCode::Char('q') => return true,
         KeyCode::Esc => {
+            app.mode = AppMode::Normal;
+        }
+        KeyCode::Tab => {
+            // Cycle from SystemOverview to Main mode
             app.mode = AppMode::Normal;
         }
         KeyCode::Char('r') => {

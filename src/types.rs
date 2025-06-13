@@ -97,6 +97,7 @@ pub enum SortColumn {
     Container,
 }
 
+#[derive(PartialEq)]
 pub enum AppMode {
     Normal,
     EditingAlert,
@@ -120,9 +121,6 @@ pub enum ChartType {
     ProcessLines,    // Line chart for individual process
     SystemStacked,   // Stacked area chart for all processes
 }
-
-
-
 
 pub struct App {
     pub start_time: Instant,
@@ -156,7 +154,6 @@ pub struct App {
     pub threshold_exceeded: bool,
     pub threshold_exceeded_time: Option<Instant>,
     pub system_alerts: HashSet<i32>, // PIDs with system alerts that should blink
-
 }
 
 impl App {
@@ -227,8 +224,6 @@ impl App {
         }
         sorted
     }
-
-
 
     pub fn update_system_stats(&mut self) {
         // Store previous stats for rate calculation
@@ -343,6 +338,4 @@ impl SystemStats {
     pub fn total_bytes(&self) -> u64 {
         self.tcp_bytes + self.udp_bytes + self.icmp_bytes + self.other_bytes
     }
-
-
 }

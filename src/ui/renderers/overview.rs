@@ -10,58 +10,50 @@ use crate::ui::utils::format_bytes;
 
 /// Render the system overview mode with dashboard metrics
 pub fn render(f: &mut Frame, app: &App) {
-    // Main layout: Title + 3 sections
+    // Main layout: Title (with navigation) + Dashboard + Alerts
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints([
-            Constraint::Length(3),  // Title
+            Constraint::Length(3),  // Title (header with navigation)
             Constraint::Min(0),     // Main dashboard area
-            Constraint::Length(9),  // Alert progress bars section (taller)
-            Constraint::Length(3),  // Footer
+            Constraint::Length(6),  // Alert progress bars section
         ])
         .split(f.size());
 
     render_title(f, app, main_chunks[0]);
     render_dashboard(f, app, main_chunks[1]);
     render_alert_progress(f, app, main_chunks[2]);
-    render_footer(f, main_chunks[3]);
 }
 
-/// Render the title with quota information
-fn render_title(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let title_text = format!(
-        "System Overview Dashboard | Data Quota: {} | +/-: adjust | r: reset",
-        format_bytes(app.total_quota_threshold)
-    );
-    let title = Block::default().title(title_text).borders(Borders::ALL);
-    f.render_widget(title, area);
+/// Render the title header with navigation inside
+fn render_title(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
+    // Create block first
+    let block = Block::default().title("System Overview Dashboard").borders(Borders::ALL);
+    // Get inner rect before moving ownership of block
+    let inner = block.inner(area);
+    // Render the outer block (moves ownership)
+    f.render_widget(block, area);
+
+    // Navigation guide paragraph rendered inside the block
+    let nav_text = "q: quit | Tab: Switch Mode | +/-: adjust quota | r: reset";
+    let nav_paragraph = Paragraph::new(nav_text);
+    f.render_widget(nav_paragraph, inner);
 }
 
 /// Render the main dashboard area with gauge, charts, and system info
 fn render_dashboard(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    // Split main area vertically: gauge on top, rest below
+    // Split main area vertically: gauge on top, protocol section below
     let dashboard_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(4),  // Bandwidth gauge on top
-            Constraint::Min(0),     // Rest below
+            Constraint::Min(0),     // Protocol section with integrated system info
         ])
         .split(area);
         
     render_bandwidth_gauge(f, app, dashboard_chunks[0]);
-    
-    // Split bottom area horizontally: protocol+breakdown box and system info box
-    let bottom_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(75),  // Protocol box gets more space
-            Constraint::Percentage(25),  // System info smaller, rightmost
-        ])
-        .split(dashboard_chunks[1]);
-
-    render_protocol_section(f, app, bottom_chunks[0]);
-    render_system_info(f, app, bottom_chunks[1]);
+    render_protocol_section(f, app, dashboard_chunks[1]);
 }
 
 /// Render the bandwidth usage gauge
@@ -102,21 +94,32 @@ fn render_bandwidth_gauge(f: &mut Frame, app: &App, area: ratatui::layout::Rect)
 /// Render the protocol distribution section
 fn render_protocol_section(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Draw outer block for protocol distribution/breakdown
-    let proto_block = Block::default().title("Protocol Distribution").borders(Borders::ALL);
+    let proto_block = Block::default().title("Protocol Distribution & System Info").borders(Borders::ALL);
     let proto_inner = proto_block.inner(area);
     f.render_widget(proto_block, area);
 
-    // Split inner area horizontally: chart left, legend right
+    // Split inner area: chart left, table and system info right
     let protocol_chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(70), // Chart area
-            Constraint::Percentage(30), // Legend area on right
+            Constraint::Percentage(60), // Chart area
+            Constraint::Percentage(40), // Table + System info area on right
         ])
         .split(proto_inner);
 
     render_protocol_chart(f, app, protocol_chunks[0]);
-    render_protocol_table(f, app, protocol_chunks[1]);
+    
+    // Split right area vertically: table top, system info bottom
+    let right_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(70), // Protocol table
+            Constraint::Percentage(30), // System info
+        ])
+        .split(protocol_chunks[1]);
+    
+    render_protocol_table(f, app, right_chunks[0]);
+    render_system_info(f, app, right_chunks[1]);
 }
 
 /// Render the protocol distribution bar chart
@@ -217,13 +220,12 @@ fn render_protocol_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     f.render_widget(protocol_table, area);
 }
 
-/// Render system information panel
+/// Render system information panel (compact version)
 fn render_system_info(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let uptime = app.start_time.elapsed();
-    let uptime_text = format!("{}h {}m {}s", 
+    let uptime_text = format!("{}h{}m", 
         uptime.as_secs() / 3600,
-        (uptime.as_secs() % 3600) / 60,
-        uptime.as_secs() % 60);
+        (uptime.as_secs() % 3600) / 60);
     
     let process_count = app.stats.len();
     let active_alerts = app.alerts.len();
@@ -232,27 +234,19 @@ fn render_system_info(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let total_bandwidth = total_sent + total_received;
     let quota_exceeded = total_bandwidth > app.total_quota_threshold;
     
-    let threshold_status = if quota_exceeded { "QUOTA EXCEEDED!" } else { "Normal" };
+    let threshold_status = if quota_exceeded { "EXCEEDED!" } else { "Normal" };
     let threshold_color = if quota_exceeded { Color::Red } else { Color::Green };
     
     let info_text = vec![
-        Line::from(format!("Uptime: {}", uptime_text)),
-        Line::from(format!("Active Processes: {}", process_count)),
-        Line::from(format!("Alert Rules: {}", active_alerts)),
+        Line::from(format!("Up: {} | Proc: {} | Alerts: {}", uptime_text, process_count, active_alerts)),
         Line::from(vec![
-            Span::raw("Quota Status: "),
+            Span::raw("Quota: "),
             Span::styled(threshold_status, Style::default().fg(threshold_color).add_modifier(Modifier::BOLD)),
         ]),
-        Line::from(""),
-        Line::from("Controls:"),
-        Line::from("  +/-: Adjust quota (±100MB)"),
-        Line::from("  r: Reset exceeded state"),
-        Line::from("  Esc: Return to main"),
-
     ];
 
     let info_paragraph = Paragraph::new(Text::from(info_text))
-        .block(Block::default().title("System Info & Controls").borders(Borders::ALL));
+        .block(Block::default().borders(Borders::TOP));
     f.render_widget(info_paragraph, area);
 }
 
@@ -266,7 +260,7 @@ fn render_alert_progress(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
                     let progress = (current_usage as f64 / alert.threshold_bytes as f64).min(1.0);
                     let progress_percent = (progress * 100.0) as usize;
                     
-                    let bar_length = 20;
+                    let bar_length = 15; // Reduced from 20 to save space
                     let filled = (progress * bar_length as f64) as usize;
                     let bar = "█".repeat(filled) + &"░".repeat(bar_length - filled);
                     
@@ -286,10 +280,16 @@ fn render_alert_progress(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
                         Color::Green
                     };
 
+                    // More compact format: name (truncated if needed), bar, percentage
+                    let name = if process_info.name.len() > 12 {
+                        format!("{}...", &process_info.name[..9])
+                    } else {
+                        process_info.name.clone()
+                    };
+
                     Some(Line::from(vec![
-                        Span::raw(format!("{}: ", process_info.name)),
-                        Span::styled(format!("[{}] {}% ", bar, progress_percent), Style::default().fg(color)),
-                        Span::raw(format!("({})", format_bytes(current_usage))),
+                        Span::raw(format!("{:12} ", name)), // Fixed width for alignment
+                        Span::styled(format!("[{}] {:3}%", bar, progress_percent), Style::default().fg(color)),
                     ]))
                 } else {
                     None
@@ -307,12 +307,4 @@ fn render_alert_progress(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
             .block(Block::default().title("Alert Thresholds").borders(Borders::ALL));
         f.render_widget(no_alerts, area);
     }
-}
-
-/// Render the footer
-fn render_footer(f: &mut Frame, area: ratatui::layout::Rect) {
-    let footer_text = "q: quit | +/-: threshold | r: reset | Esc: return to main";
-    let footer = Paragraph::new(footer_text)
-        .block(Block::default().borders(Borders::ALL));
-    f.render_widget(footer, area);
 } 

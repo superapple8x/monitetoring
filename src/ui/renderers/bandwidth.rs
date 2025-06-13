@@ -4,22 +4,21 @@ use ratatui::{
     style::{Style, Color, Modifier},
     Frame
 };
-use crate::types::{App, SortColumn, SortDirection, ChartType};
+use crate::types::{App, SortColumn, SortDirection};
 use crate::ui::{utils::format_bytes, charts::render_charts};
 
 /// Render the bandwidth mode view with prominent chart display
 pub fn render(f: &mut Frame, app: &App) {
-    // Layout: Title, Chart (70%), Compact Table (rest), Totals, Footer
+    // Layout: Title, Chart, Table (expanded), Totals
     let main_chunks = Layout::default()
         .direction(Direction::Vertical)
         .margin(1)
         .constraints(
             [
                 Constraint::Length(3),               // Title
-                Constraint::Percentage(60),          // Chart (reduced from 70% to make room)
-                Constraint::Min(0),                  // Table
+                Constraint::Percentage(60),          // Chart
+                Constraint::Min(0),                  // Table (expanded to use available space)
                 Constraint::Length(3),               // Totals
-                Constraint::Length(6),               // Footer / Alert (more space for dual messages)
             ]
             .as_ref(),
         )
@@ -29,12 +28,12 @@ pub fn render(f: &mut Frame, app: &App) {
     render_charts(f, app, main_chunks[1]);
     render_process_table(f, app, main_chunks[2]);
     render_totals_bar(f, app, main_chunks[3]);
-    render_footer(f, app, main_chunks[4]);
+    // Removed footer rendering - no alert/command messages in bandwidth mode
 }
 
 /// Render the title bar for bandwidth mode
 fn render_title(f: &mut Frame, area: ratatui::layout::Rect) {
-    let navigation_text = "q: quit | b: toggle view | t: chart type | ↑/↓: select | Enter: actions";
+    let navigation_text = "q: quit | Tab: switch mode | t: chart type | ↑/↓: select | Enter: actions";
     let title = Paragraph::new(navigation_text)
         .block(Block::default().title("Monitetoring – Bandwidth View").borders(Borders::ALL));
     f.render_widget(title, area);
@@ -149,62 +148,4 @@ fn render_totals_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let totals = Paragraph::new(totals_text)
         .block(Block::default().borders(Borders::ALL).title("Network Totals"));
     f.render_widget(totals, area);
-}
-
-/// Render the footer with bandwidth-specific controls
-fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    // Check if we have recent command execution or alert message
-    let recent_log_entry = app.command_execution_log.last();
-    
-    if let Some(msg) = &app.last_alert_message {
-        // Split the area if we also have a recent command execution
-        if let Some((timestamp, log_msg)) = recent_log_entry {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Length(3)].as_ref())
-                .split(area);
-            
-            // Show command execution log entry first
-            let elapsed = timestamp.elapsed().as_secs();
-            let time_str = if elapsed < 60 {
-                format!("{}s ago", elapsed)
-            } else {
-                format!("{}m ago", elapsed / 60)
-            };
-            
-            let execution_message = Paragraph::new(format!("{} ({})", log_msg, time_str))
-                .style(Style::default().fg(Color::Cyan))
-                .block(Block::default().borders(Borders::ALL).title("Command Execution"));
-            f.render_widget(execution_message, chunks[0]);
-            
-            // Show alert message below
-            let alert_message = Paragraph::new(msg.as_str())
-                .style(Style::default().fg(Color::Yellow))
-                .block(Block::default().borders(Borders::ALL).title("Last Alert"));
-            f.render_widget(alert_message, chunks[1]);
-        } else {
-            // Only alert message
-            let alert_message = Paragraph::new(msg.as_str())
-                .style(Style::default().fg(Color::Yellow))
-                .block(Block::default().borders(Borders::ALL).title("Last Alert"));
-            f.render_widget(alert_message, area);
-        }
-    } else if let Some((timestamp, log_msg)) = recent_log_entry {
-        // Only command execution log
-        let elapsed = timestamp.elapsed().as_secs();
-        let time_str = if elapsed < 60 {
-            format!("{}s ago", elapsed)
-        } else {
-            format!("{}m ago", elapsed / 60)
-        };
-        
-        let execution_message = Paragraph::new(format!("{} ({})", log_msg, time_str))
-            .style(Style::default().fg(Color::Cyan))
-            .block(Block::default().borders(Borders::ALL).title("Command Execution"));
-        f.render_widget(execution_message, area);
-    } else {
-        // Default footer text - navigation is now in header
-        let footer = Paragraph::new("No Action Executed").block(Block::default().borders(Borders::ALL));
-        f.render_widget(footer, area);
-    }
 } 

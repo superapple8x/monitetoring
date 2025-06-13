@@ -71,7 +71,7 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
     match action {
         AlertAction::SystemAlert => {
             // Just return a notification message, no process killing
-            (false, Some(format!("🚨 System Alert: {} (PID {}) exceeded bandwidth threshold", name, pid)), None)
+            (false, Some(format!("🚨 System Alert for {} (PID {}):\nExceeded bandwidth threshold", name, pid)), None)
         }
         AlertAction::Kill => {
             // First, send the kill signal
@@ -148,14 +148,14 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
                                 let execution_time = start_time.elapsed();
                                 if status.success() {
                                     return (false, Some(format!(
-                                        "✅ Custom command executed successfully for {} (PID {}) in {:.2}s | Usage: {} ({}% over threshold)", 
+                                        "✅ Custom command executed successfully for {} (PID {}) in {:.2}s:\nUsage: {} ({}% over threshold)", 
                                         name, pid, execution_time.as_secs_f64(),
                                         format_bytes(total_usage),
                                         ((total_usage as f64 / threshold as f64 - 1.0) * 100.0) as u32
                                     )), Some(execution_log_entry));
                                 } else {
                                     return (false, Some(format!(
-                                        "❌ Custom command failed (exit code: {}) for {} (PID {}) after {:.2}s | Usage: {}", 
+                                        "❌ Custom command failed (exit code: {}) for {} (PID {}) after {:.2}s:\nUsage: {}", 
                                         status.code().unwrap_or(-1), name, pid, 
                                         execution_time.as_secs_f64(), format_bytes(total_usage)
                                     )), Some(execution_log_entry));
@@ -168,7 +168,7 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
                                     let _ = child.kill();
                                     let _ = child.wait(); // Clean up zombie
                                     return (false, Some(format!(
-                                        "⏰ Custom command timed out after {}s for {} (PID {}) | Usage: {}", 
+                                        "⏰ Custom command timed out after {}s for {} (PID {}):\nUsage: {}", 
                                         timeout_duration.as_secs(), name, pid, format_bytes(total_usage)
                                     )), Some(execution_log_entry));
                                 }
@@ -177,7 +177,7 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
                             }
                             Err(e) => {
                                 return (false, Some(format!(
-                                    "❌ Error waiting for custom command for {} (PID {}): {} | Usage: {}", 
+                                    "❌ Error waiting for custom command for {} (PID {}):\n{} | Usage: {}", 
                                     name, pid, e, format_bytes(total_usage)
                                 )), Some(execution_log_entry));
                             }
@@ -186,7 +186,7 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
                 }
                 Err(e) => {
                     (false, Some(format!(
-                        "❌ Failed to spawn custom command for {} (PID {}): {} | Usage: {}", 
+                        "❌ Failed to spawn custom command for {} (PID {}):\n{} | Usage: {}", 
                         name, pid, e, format_bytes(total_usage)
                     )), Some(execution_log_entry))
                 }
@@ -477,7 +477,7 @@ async fn main() -> Result<(), io::Error> {
                             if let AlertAction::CustomCommand(cmd) = &alert.action {
                                 let total_usage = stats.sent + stats.received;
                                 let execution_log_entry = format!(
-                                    "🔧 Executing custom command for {} (PID {}): {} | Usage: {} ({}% over threshold)",
+                                    "Command execution for {} (PID {}):\n{} | Usage: {} ({}% over threshold)",
                                     &stats.name, *pid, cmd, format_bytes(total_usage),
                                     ((total_usage as f64 / alert.threshold_bytes as f64 - 1.0) * 100.0) as u32
                                 );

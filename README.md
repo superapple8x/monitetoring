@@ -121,16 +121,67 @@ The TUI interface provides:
 - Container information when enabled
 - Human-readable bandwidth display
 
+### Interface Modes
+
+Monitetoring has three main interface modes that you can cycle through using the `Tab` key:
+
+#### 1. Main Mode (Default)
+- **Purpose**: Real-time process monitoring with detailed table view
+- **Features**: 
+  - Sortable process table showing PID, name, bandwidth usage
+  - Process selection and action panel (kill, set alerts)
+  - Container information (when enabled)
+  - Network totals display
+
+#### 2. Overview Mode
+- **Purpose**: System-wide dashboard with quota management
+- **Features**:
+  - Data usage gauge with quota visualization
+  - Protocol breakdown (TCP, UDP, ICMP, Other) with charts
+  - System information (uptime, process count, alert status)
+  - Alert threshold progress bars for monitored processes
+  - Quota management controls
+
+#### 3. Bandwidth Mode
+- **Purpose**: Visual bandwidth analysis with charts
+- **Features**:
+  - Real-time bandwidth charts (process lines or system stacked)
+  - Compact process table alongside charts
+  - Chart type switching (individual process vs. system-wide)
+  - Metrics mode switching (combined, send-only, receive-only)
+
 ### Keyboard Controls
 
+#### Navigation
 | Key | Action |
 |-----|--------|
-| `q` | Quit |
+| `q` | Quit application |
+| `Tab` | Switch mode |
+| `Esc` | Return to main mode from overview |
+
+#### Main Mode
+| Key | Action |
+|-----|--------|
 | `p` | Sort by PID |
 | `n` | Sort by process name |
 | `s` | Sort by bytes sent |
 | `r` | Sort by bytes received |
 | `c` | Sort by container name (when containers enabled) |
+| `d` | Toggle sort direction (ascending/descending) |
+| `↑/↓` | Select process |
+| `Enter` | Show actions for selected process |
+
+#### Bandwidth Mode
+| Key | Action |
+|-----|--------|
+| `t` | Toggle chart type (process lines/system stacked) |
+| `m` | Toggle metrics mode (combined/send only/receive only) |
+
+#### Overview Mode
+| Key | Action |
+|-----|--------|
+| `+/-` | Adjust data quota threshold (±100MB) |
+| `r` | Reset quota exceeded state |
 
 
 

@@ -10,24 +10,40 @@ use crate::ui::{utils::format_bytes, charts::render_charts};
 
 /// Render the normal mode view
 pub fn render(f: &mut Frame, app: &App) {
-    let main_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(1)
-        .constraints(
-            [
-                Constraint::Length(3), // Title
+    // Check if we have messages to show
+    let recent_log_entry = app.command_execution_log.last();
+    let has_messages = app.last_alert_message.is_some() || recent_log_entry.is_some();
+    
+    // Adaptive layout based on whether we have messages to show
+    let main_chunks = if has_messages {
+        // When messages exist, allocate space for them
+        Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(3), // Navigation
                 Constraint::Min(0),    // Main content (Table + Action Panel)
                 Constraint::Length(3), // Totals
-                Constraint::Length(6), // Footer / Alert Message (more space for dual messages)
-            ]
-            .as_ref(),
-        )
-        .split(f.size());
+                Constraint::Length(6), // Footer / Alert Message (space for dual messages)
+            ])
+            .split(f.size())
+    } else {
+        // When no messages, expand main content area
+        Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(3), // Navigation
+                Constraint::Min(0),    // Main content (Table + Action Panel) - expanded
+                Constraint::Length(3), // Totals
+            ])
+            .split(f.size())
+    };
 
     let navigation_text = if app.containers_mode {
-        "q: quit | o: overview | b: bandwidth | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
+        "q: quit | Tab: switch mode | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
     } else {
-        "q: quit | o: overview | b: bandwidth | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
+        "q: quit | Tab: switch mode | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
     };
     let title = Paragraph::new(navigation_text)
         .block(Block::default().title("Monitetoring").borders(Borders::ALL));
@@ -66,7 +82,11 @@ pub fn render(f: &mut Frame, app: &App) {
     }
 
     render_totals_bar(f, app, main_chunks[2]);
-    render_footer(f, app, main_chunks[3]);
+    
+    // Only render footer if we have messages to show
+    if has_messages {
+        render_footer(f, app, main_chunks[3]);
+    }
 }
 
 /// Render the process table
@@ -225,54 +245,55 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let recent_log_entry = app.command_execution_log.last();
     
     if let Some(msg) = &app.last_alert_message {
-        // Split the area if we also have a recent command execution
         if let Some((timestamp, log_msg)) = recent_log_entry {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(3), Constraint::Length(3)].as_ref())
                 .split(area);
-            
-            // Show command execution log entry first
+
+            // Command execution box
             let elapsed = timestamp.elapsed().as_secs();
-            let time_str = if elapsed < 60 {
-                format!("{}s ago", elapsed)
-            } else {
-                format!("{}m ago", elapsed / 60)
-            };
-            
-            let execution_message = Paragraph::new(format!("{} ({})", log_msg, time_str))
+            let time_str = if elapsed < 60 { format!("{}s ago", elapsed) } else { format!("{}m ago", elapsed / 60) };
+            let mut parts = log_msg.splitn(2, '\n');
+            let header = parts.next().unwrap_or("Command Execution");
+            let body = parts.next().unwrap_or("");
+            let exec_paragraph = Paragraph::new(format!("{} ({})", body.trim(), time_str))
                 .style(Style::default().fg(Color::Cyan))
-                .block(Block::default().borders(Borders::ALL).title("Command Execution"));
-            f.render_widget(execution_message, chunks[0]);
-            
-            // Show alert message below
-            let alert_message = Paragraph::new(msg.as_str())
-                .style(Style::default().fg(Color::Yellow))
-                .block(Block::default().borders(Borders::ALL).title("Last Alert"));
-            f.render_widget(alert_message, chunks[1]);
+                .block(Block::default().borders(Borders::ALL).title(header));
+            f.render_widget(exec_paragraph, chunks[0]);
+
+            // Alert message box
+            let alert_paragraph = format_alert_message(msg);
+            f.render_widget(alert_paragraph, chunks[1]);
         } else {
             // Only alert message
-            let alert_message = Paragraph::new(msg.as_str())
-                .style(Style::default().fg(Color::Yellow))
-                .block(Block::default().borders(Borders::ALL).title("Last Alert"));
-            f.render_widget(alert_message, area);
+            let alert_paragraph = format_alert_message(msg);
+            f.render_widget(alert_paragraph, area);
         }
     } else if let Some((timestamp, log_msg)) = recent_log_entry {
-        // Only command execution log
         let elapsed = timestamp.elapsed().as_secs();
-        let time_str = if elapsed < 60 {
-            format!("{}s ago", elapsed)
-        } else {
-            format!("{}m ago", elapsed / 60)
-        };
-        
-        let execution_message = Paragraph::new(format!("{} ({})", log_msg, time_str))
+        let time_str = if elapsed < 60 { format!("{}s ago", elapsed) } else { format!("{}m ago", elapsed / 60) };
+        let mut parts = log_msg.splitn(2, '\n');
+        let header = parts.next().unwrap_or("Command Execution");
+        let body = parts.next().unwrap_or("");
+        let exec_paragraph = Paragraph::new(format!("{} ({})", body.trim(), time_str))
             .style(Style::default().fg(Color::Cyan))
-            .block(Block::default().borders(Borders::ALL).title("Command Execution"));
-        f.render_widget(execution_message, area);
+            .block(Block::default().borders(Borders::ALL).title(header));
+        f.render_widget(exec_paragraph, area);
+    }
+    // If no messages to show, leave the space empty (removed the "No Action Executed" box)
+}
+
+fn format_alert_message(msg: &str) -> Paragraph {
+    if let Some(pos) = msg.find(':') {
+        let header = &msg[..=pos];
+        let body = msg[pos + 1..].trim();
+        Paragraph::new(body)
+            .style(Style::default().fg(Color::Yellow))
+            .block(Block::default().borders(Borders::ALL).title(header))
     } else {
-        // Default footer text - navigation is now in header
-        let footer = Paragraph::new("No Action Executed").block(Block::default().borders(Borders::ALL));
-        f.render_widget(footer, area);
+        Paragraph::new(msg)
+            .style(Style::default().fg(Color::Yellow))
+            .block(Block::default().borders(Borders::ALL).title("Alert"))
     }
 } 
