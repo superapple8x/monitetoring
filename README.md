@@ -9,22 +9,48 @@ A real-time per-process network bandwidth monitoring tool for Linux, inspired by
 - Interactive setup when run without arguments
 - Configuration persistence between runs
 - TUI interface or JSON output for scripting
-- Sortable columns (PID, process name, sent/received bytes, container name)
+- Sortable columns (PID, process name, sent/received bytes, container name, user name)
 - Human-readable bandwidth formatting (B, KB, MB, GB, TB)
 - Network interface selection
-- Works without configuration
+- Works out of the box – configuration is purely optional
 
-## UI
+## Screenshots
 
-![Monitetoring TUI Interface](doc/image.png)
+| Main View | Bandwidth – System Stack | Bandwidth – Process Lines | System Overview |
+|-----------|-------------------------|---------------------------|-----------------|
+| ![Main View](doc/main_view.png) | ![Stacked Bandwidth](doc/bandwidth_stacked.png) | ![Process Bandwidth](doc/bandwidth_process.png) | ![System Overview](doc/system_overview.png) |
 
 ## Installation
 
 ### Prerequisites
 
 - Linux system (kernel 2.6+ recommended)
-- Rust 1.70+ (for building from source)
+- Rust tool-chain (stable) – see installation guide below
 - Root/sudo privileges (required for packet capture)
+
+#### Installing Rust
+
+Monitetoring is written in Rust. If you don't already have the tool-chain installed, run **one** of the following snippets:
+
+##### Ubuntu / Debian
+
+```bash
+sudo apt update
+sudo apt install -y curl build-essential pkg-config libssl-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+```
+
+##### Fedora / RHEL / CentOS
+
+```bash
+sudo dnf install -y curl pkg-config openssl-devel
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+```
+
+After installation re-open your terminal or run `source $HOME/.cargo/env` so that `cargo` is available in your `PATH`.
+
 
 ### From Source
 
@@ -85,17 +111,18 @@ This will:
 ### Direct Usage
 
 ```bash
-# From source (development)
-sudo cargo run -- --interface any
-sudo cargo run -- --interface eth0 --json
-sudo cargo run -- --interface eth0 --containers
-sudo cargo run -- --reset
 
 # If installed system-wide
 sudo monitetoring --interface any
 sudo monitetoring --interface eth0 --json
 sudo monitetoring --interface eth0 --containers
 sudo monitetoring --reset
+
+# From source (development)
+sudo cargo run -- --interface any
+sudo cargo run -- --interface eth0 --json
+sudo cargo run -- --interface eth0 --containers
+sudo cargo run -- --reset
 ```
 
 ## Command Line Options
@@ -164,6 +191,7 @@ Monitetoring has three main interface modes that you can cycle through using the
 |-----|--------|
 | `p` | Sort by PID |
 | `n` | Sort by process name |
+| `u` | Sort by user |
 | `s` | Sort by bytes sent |
 | `r` | Sort by bytes received |
 | `c` | Sort by container name (when containers enabled) |
@@ -182,8 +210,6 @@ Monitetoring has three main interface modes that you can cycle through using the
 |-----|--------|
 | `+/-` | Adjust data quota threshold (±100MB) |
 | `r` | Reset quota exceeded state |
-
-
 
 ## JSON Output Mode
 
