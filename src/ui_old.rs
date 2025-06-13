@@ -141,9 +141,9 @@ fn render_normal_mode(f: &mut Frame, app: &App) {
         .split(content_chunks[0]);
 
     let header_titles_str = if app.containers_mode {
-        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total", "(C)ontainer"]
+        vec!["(P)ID", "Name", "Sent/s", "(S) Tot", "Recv/s", "(R) Tot", "(C)ontainer"]
     } else {
-        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total"]
+        vec!["(P)ID", "Name", "Sent/s", "(S) Tot", "Recv/s", "(R) Tot"]
     };
     let mut header_titles: Vec<String> = header_titles_str.iter().map(|s| s.to_string()).collect();
 
@@ -512,9 +512,9 @@ fn render_bandwidth_mode(f: &mut Frame, app: &App) {
 
     // Full process table (same columns as normal view)
     let header_titles_str = if app.containers_mode {
-        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total", "(C)ontainer"]
+        vec!["(P)ID", "Name", "Sent/s", "(S) Tot", "Recv/s", "(R) Tot", "(C)ontainer"]
     } else {
-        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total"]
+        vec!["(P)ID", "Name", "Sent/s", "(S) Tot", "Recv/s", "(R) Tot"]
     };
     let mut header_titles: Vec<String> = header_titles_str.iter().map(|s| s.to_string()).collect();
 

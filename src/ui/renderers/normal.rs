@@ -91,10 +91,18 @@ pub fn render(f: &mut Frame, app: &App) {
 
 /// Render the process table
 fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let header_titles_str = if app.containers_mode {
-        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total", "(C)ontainer"]
+    let header_titles_str = if app.show_total_columns {
+        if app.containers_mode {
+            vec!["(P)ID", "Name", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot", "(C)ontainer"]
+        } else {
+            vec!["(P)ID", "Name", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot"]
+        }
     } else {
-        vec!["(P)ID", "Name", "Sent/s", "(S)ent Total", "Recv/s", "(R)eceived Total"]
+        if app.containers_mode {
+            vec!["(P)ID", "Name", "Sent/s", "Recv/s", "(C)ontainer"]
+        } else {
+            vec!["(P)ID", "Name", "Sent/s", "Recv/s"]
+        }
     };
     let mut header_titles: Vec<String> = header_titles_str.iter().map(|s| s.to_string()).collect();
 
@@ -103,8 +111,17 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         SortColumn::Pid => header_titles[0].push_str(sort_indicator),
         SortColumn::Name => header_titles[1].push_str(sort_indicator),
         SortColumn::Sent => header_titles[2].push_str(sort_indicator),
-        SortColumn::Received => header_titles[4].push_str(sort_indicator),
-        SortColumn::Container if app.containers_mode => header_titles[6].push_str(sort_indicator),
+        SortColumn::Received => {
+            if app.show_total_columns {
+                header_titles[4].push_str(sort_indicator);
+            } else {
+                header_titles[3].push_str(sort_indicator);
+            }
+        },
+        SortColumn::Container if app.containers_mode => {
+            let container_idx = if app.show_total_columns { 6 } else { 4 };
+            header_titles[container_idx].push_str(sort_indicator);
+        },
         _ => {}
     }
 
@@ -124,50 +141,90 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             style = style.add_modifier(Modifier::BOLD);
         }
 
-        let cells = if app.containers_mode {
-            vec![
-                Cell::from(pid.to_string()),
-                Cell::from(data.name.clone()),
-                Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
-                Cell::from(format_bytes(data.sent)),
-                Cell::from(format!("{}/s", format_bytes(data.received_rate))),
-                Cell::from(format_bytes(data.received)),
-                Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
-            ]
+        let cells = if app.show_total_columns {
+            if app.containers_mode {
+                vec![
+                    Cell::from(pid.to_string()),
+                    Cell::from(data.name.clone()),
+                    Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
+                    Cell::from(format_bytes(data.sent)),
+                    Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                    Cell::from(format_bytes(data.received)),
+                    Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
+                ]
+            } else {
+                vec![
+                    Cell::from(pid.to_string()),
+                    Cell::from(data.name.clone()),
+                    Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
+                    Cell::from(format_bytes(data.sent)),
+                    Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                    Cell::from(format_bytes(data.received)),
+                ]
+            }
         } else {
-            vec![
-                Cell::from(pid.to_string()),
-                Cell::from(data.name.clone()),
-                Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
-                Cell::from(format_bytes(data.sent)),
-                Cell::from(format!("{}/s", format_bytes(data.received_rate))),
-                Cell::from(format_bytes(data.received)),
-            ]
+            if app.containers_mode {
+                vec![
+                    Cell::from(pid.to_string()),
+                    Cell::from(data.name.clone()),
+                    Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
+                    Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                    Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
+                ]
+            } else {
+                vec![
+                    Cell::from(pid.to_string()),
+                    Cell::from(data.name.clone()),
+                    Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
+                    Cell::from(format!("{}/s", format_bytes(data.received_rate))),
+                ]
+            }
         };
         Row::new(cells).style(style)
     });
 
-    let widths = if app.containers_mode {
-        [
-            Constraint::Percentage(10),
-            Constraint::Percentage(20),
-            Constraint::Percentage(15),
-            Constraint::Percentage(15),
-            Constraint::Percentage(15),
-            Constraint::Percentage(15),
-            Constraint::Percentage(10),
-        ]
-        .as_slice()
+    let widths = if app.show_total_columns {
+        if app.containers_mode {
+            [
+                Constraint::Percentage(10),
+                Constraint::Percentage(20),
+                Constraint::Percentage(15),
+                Constraint::Percentage(15),
+                Constraint::Percentage(15),
+                Constraint::Percentage(15),
+                Constraint::Percentage(10),
+            ]
+            .as_slice()
+        } else {
+            [
+                Constraint::Percentage(15),
+                Constraint::Percentage(25),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+            ]
+            .as_slice()
+        }
     } else {
-        [
-            Constraint::Percentage(15),
-            Constraint::Percentage(25),
-            Constraint::Percentage(20),
-            Constraint::Percentage(20),
-            Constraint::Percentage(20),
-            Constraint::Percentage(20),
-        ]
-        .as_slice()
+        if app.containers_mode {
+            [
+                Constraint::Percentage(20),
+                Constraint::Percentage(40),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+            ]
+            .as_slice()
+        } else {
+            [
+                Constraint::Percentage(20),
+                Constraint::Percentage(40),
+                Constraint::Percentage(20),
+                Constraint::Percentage(20),
+            ]
+            .as_slice()
+        }
     };
     let table = Table::new(rows, widths)
         .header(header)

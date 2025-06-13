@@ -20,6 +20,7 @@ pub struct InteractiveConfig {
     pub interface: String,
     pub json_mode: bool,
     pub containers_mode: bool,
+    pub show_total_columns: bool,
 }
 
 /// Helper struct for managing user input operations
@@ -89,11 +90,12 @@ impl DisplayHelper {
         println!();
     }
 
-    fn print_config_summary(interface: &str, json_mode: bool, containers_mode: bool) {
+    fn print_config_summary(interface: &str, json_mode: bool, containers_mode: bool, show_total_columns: bool) {
         println!("📋 Configuration Summary:");
         println!("   📡 Interface: {}", interface);
         println!("   📊 Mode: {}", if json_mode { "JSON output" } else { "Interactive TUI" });
         println!("   🐳 Container awareness: {}", if containers_mode { "Enabled" } else { "Disabled" });
+        println!("   📈 Show total columns: {}", if show_total_columns { "Yes" } else { "No" });
         println!();
     }
 
@@ -146,6 +148,7 @@ fn handle_existing_config(saved: SavedConfig) -> Result<Option<InteractiveConfig
         interface: saved.interface,
         json_mode: saved.json_mode,
         containers_mode: saved.containers_mode,
+        show_total_columns: saved.show_total_columns,
     }))
 }
 
@@ -162,9 +165,12 @@ fn run_full_interactive_setup() -> Result<Option<InteractiveConfig>, io::Error> 
     // Step 2: Choose mode
     let (json_mode, containers_mode) = choose_mode()?;
 
-    // Step 3: Show summary and confirm
+    // Step 3: Choose display options
+    let show_total_columns = choose_display_options()?;
+
+    // Step 4: Show summary and confirm
     println!();
-    DisplayHelper::print_config_summary(&interface, json_mode, containers_mode);
+    DisplayHelper::print_config_summary(&interface, json_mode, containers_mode, show_total_columns);
 
     // Step 4: Ask if user wants to save these settings
     let save_settings = ask_save_settings()?;
@@ -177,21 +183,23 @@ fn run_full_interactive_setup() -> Result<Option<InteractiveConfig>, io::Error> 
 
     // Save configuration if user requested it
     if save_settings {
-        save_user_config(&interface, json_mode, containers_mode)?;
+        save_user_config(&interface, json_mode, containers_mode, show_total_columns)?;
     }
 
     Ok(Some(InteractiveConfig {
         interface,
         json_mode,
         containers_mode,
+        show_total_columns,
     }))
 }
 
-fn save_user_config(interface: &str, json_mode: bool, containers_mode: bool) -> Result<(), io::Error> {
+fn save_user_config(interface: &str, json_mode: bool, containers_mode: bool, show_total_columns: bool) -> Result<(), io::Error> {
     let config = SavedConfig {
         interface: interface.to_string(),
         json_mode,
         containers_mode,
+        show_total_columns,
         alerts: vec![], // Initialize with no alerts
     };
     
@@ -296,8 +304,18 @@ fn choose_mode() -> Result<(bool, bool), io::Error> {
         println!("   (Docker, Podman, LXC, etc.)");
         println!();
         
-        let containers_mode = InputHandler::confirm_prompt("🐳 Enable container awareness?", true)?;
+        let containers_mode = InputHandler::confirm_prompt("🐳 Enable container awareness?", false)?;
 
         return Ok((json_mode, containers_mode));
     }
+}
+
+fn choose_display_options() -> Result<bool, io::Error> {
+    println!();
+    println!("📈 Display Options:");
+    println!("   Show total bandwidth columns (Sent Total / Received Total) in process table?");
+    println!("   These columns show cumulative data usage since monitoring started.");
+    println!();
+    
+    InputHandler::confirm_prompt("📈 Show total columns?", false)
 } 

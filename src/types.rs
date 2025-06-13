@@ -128,6 +128,7 @@ pub struct App {
     pub sort_by: SortColumn,
     pub sort_direction: SortDirection,
     pub containers_mode: bool,
+    pub show_total_columns: bool,
     pub alerts: HashMap<i32, Alert>,
     pub selected_process: Option<i32>,
     pub show_action_panel: bool,
@@ -160,13 +161,14 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(containers_mode: bool) -> Self {
+    pub fn new(containers_mode: bool, show_total_columns: bool) -> Self {
         App {
             start_time: Instant::now(),
             stats: HashMap::new(),
             sort_by: SortColumn::Pid,
             sort_direction: SortDirection::Asc,
             containers_mode,
+            show_total_columns,
             alerts: HashMap::new(),
             selected_process: None,
             show_action_panel: false,

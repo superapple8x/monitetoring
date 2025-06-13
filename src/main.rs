@@ -218,18 +218,18 @@ async fn main() -> Result<(), io::Error> {
     }
 
     // Check if no arguments were provided - run interactive mode
-    let (iface, json_mode, containers_mode) = if cli.iface.is_none() && !cli.json && !cli.containers {
+    let (iface, json_mode, containers_mode, show_total_columns) = if cli.iface.is_none() && !cli.json && !cli.containers {
         // No arguments provided, run interactive mode
         match run_interactive_mode()? {
-            Some(config) => (config.interface, config.json_mode, config.containers_mode),
+            Some(config) => (config.interface, config.json_mode, config.containers_mode, config.show_total_columns),
             None => {
                 // User cancelled or quit
                 return Ok(());
             }
         }
     } else if let Some(iface) = cli.iface {
-        // Arguments provided, use them
-        (iface, cli.json, cli.containers)
+        // Arguments provided, use them (default show_total_columns to false)
+        (iface, cli.json, cli.containers, false)
     } else {
         // Some arguments provided but no interface - show help
         show_interface_help();
@@ -392,7 +392,7 @@ async fn main() -> Result<(), io::Error> {
         std::thread::sleep(std::time::Duration::from_millis(2000));
         
         // Start TUI
-        let mut app = App::new(containers_mode);
+        let mut app = App::new(containers_mode, show_total_columns);
         if let Some(saved_config) = load_config() {
             for alert in saved_config.alerts {
                 app.alerts.insert(alert.process_pid, alert);

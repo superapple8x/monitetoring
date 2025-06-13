@@ -23,6 +23,8 @@ pub struct SavedConfig {
     pub json_mode: bool,
     pub containers_mode: bool,
     #[serde(default)]
+    pub show_total_columns: bool,
+    #[serde(default)]
     pub alerts: Vec<Alert>,
 }
 
