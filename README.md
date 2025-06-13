@@ -16,9 +16,21 @@ A real-time per-process network bandwidth monitoring tool for Linux, inspired by
 
 ## Screenshots
 
-| Main View | Bandwidth – System Stack | Bandwidth – Process Lines | System Overview |
-|-----------|-------------------------|---------------------------|-----------------|
-| ![Main View](doc/main_view.png) | ![Stacked Bandwidth](doc/bandwidth_stacked.png) | ![Process Bandwidth](doc/bandwidth_process.png) | ![System Overview](doc/system_overview.png) |
+**Main View**
+
+![Main View](doc/main_view.png)
+
+**Bandwidth – System Stack**
+
+![Stacked Bandwidth](doc/bandwidth_stacked.png)
+
+**Bandwidth – Process Lines**
+
+![Process Bandwidth](doc/bandwith_process.png)
+
+**System Overview**
+
+![System Overview](doc/system_overview.png)
 
 ## Installation
 
