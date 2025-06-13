@@ -97,7 +97,7 @@ pub enum SortColumn {
     Container,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum AppMode {
     Normal,
     EditingAlert,
@@ -109,14 +109,14 @@ pub enum EditingField {
     Command,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum MetricsMode {
     Combined,    // Send + Receive (current behavior)
     SendOnly,    // Only sent bandwidth
     ReceiveOnly, // Only received bandwidth
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum ChartType {
     ProcessLines,    // Line chart for individual process
     SystemStacked,   // Stacked area chart for all processes
@@ -155,6 +155,8 @@ pub struct App {
     pub threshold_exceeded_time: Option<Instant>,
     pub system_alerts: HashSet<i32>, // PIDs with system alerts that should blink
     pub alert_scroll_offset: usize, // Scroll offset for alert progress bars
+    // Performance optimization
+    pub last_chart_update: Instant, // Last time chart datasets were updated
 }
 
 impl App {
@@ -192,6 +194,8 @@ impl App {
             threshold_exceeded_time: None,
             system_alerts: HashSet::new(),
             alert_scroll_offset: 0,
+            // Performance optimization
+            last_chart_update: Instant::now(),
         }
     }
 
@@ -224,8 +228,11 @@ impl App {
         if self.sort_direction == SortDirection::Desc {
             sorted.reverse();
         }
+
         sorted
     }
+
+
 
     pub fn update_system_stats(&mut self) {
         // Store previous stats for rate calculation

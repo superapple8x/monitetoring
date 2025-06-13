@@ -230,10 +230,15 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Char('t') => {
             // Toggle chart type only when in bandwidth mode
             if app.bandwidth_mode {
+                let old_chart_type = app.chart_type;
                 app.chart_type = match app.chart_type {
                     ChartType::ProcessLines => ChartType::SystemStacked,
                     ChartType::SystemStacked => ChartType::ProcessLines,
                 };
+                // Force chart update only when switching to SystemStacked
+                if app.chart_type == ChartType::SystemStacked && old_chart_type != ChartType::SystemStacked {
+                    crate::ui::charts::update_chart_datasets(app);
+                }
             }
         }
         KeyCode::Char('m') => {
@@ -244,6 +249,8 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
                     MetricsMode::SendOnly => MetricsMode::ReceiveOnly,
                     MetricsMode::ReceiveOnly => MetricsMode::Combined,
                 };
+                // Force chart update when changing metrics mode
+                crate::ui::charts::update_chart_datasets(app);
             }
         }
         KeyCode::Down => {

@@ -19,7 +19,7 @@ use nix::unistd::Pid;
 use nix::errno::Errno;
 
 use config::{Cli, reset_config, load_config};
-use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction};
+use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction, ChartType};
 use process::refresh_proc_maps;
 use capture::connection_from_packet;
 use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event, update_chart_datasets, utils::format_bytes};
@@ -437,17 +437,26 @@ async fn main() -> Result<(), io::Error> {
                     let cutoff = now - 600.0; // 600s = 10 min
                     stats.sent_history.retain(|(t, _)| *t >= cutoff);
                     stats.received_history.retain(|(t, _)| *t >= cutoff);
-
-                    // Update system-wide bandwidth history
-                    let current_system_snapshot: Vec<(i32, f64, f64)> = app.stats.iter()
-                        .map(|(pid, info)| (*pid, info.sent_rate as f64, info.received_rate as f64))
-                        .collect();
-                    app.system_bandwidth_history.push((now, current_system_snapshot));
                     
-                    // Retain only last 10 minutes of system history
-                    app.system_bandwidth_history.retain(|(t, _)| *t >= cutoff);
 
-                    // Update chart datasets for stacked view
+
+                    // Update system-wide bandwidth history (moved outside the loop for efficiency)
+                }
+                
+                // Update system-wide bandwidth history once per batch
+                let now = app.start_time.elapsed().as_secs_f64();
+                let cutoff = now - 600.0; // 600s = 10 min
+                
+                let current_system_snapshot: Vec<(i32, f64, f64)> = app.stats.iter()
+                    .map(|(pid, info)| (*pid, info.sent_rate as f64, info.received_rate as f64))
+                    .collect();
+                app.system_bandwidth_history.push((now, current_system_snapshot));
+                
+                // Retain only last 10 minutes of system history
+                app.system_bandwidth_history.retain(|(t, _)| *t >= cutoff);
+
+                // Update chart datasets for stacked view (only when needed)
+                if app.bandwidth_mode && app.chart_type == ChartType::SystemStacked {
                     update_chart_datasets(&mut app);
                 }
                 
