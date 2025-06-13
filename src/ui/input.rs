@@ -191,6 +191,7 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Char('q') => return true,
         KeyCode::Char('p') => app.sort_by = SortColumn::Pid,
         KeyCode::Char('n') => app.sort_by = SortColumn::Name,
+        KeyCode::Char('u') => app.sort_by = SortColumn::User,
         KeyCode::Char('s') => app.sort_by = SortColumn::Sent,
         KeyCode::Char('r') => app.sort_by = SortColumn::Received,
         KeyCode::Char('c') => {

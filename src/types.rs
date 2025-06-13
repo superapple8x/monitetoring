@@ -39,6 +39,7 @@ pub struct ProcessInfo {
     pub sent_rate: u64,      // bytes per second
     pub received_rate: u64,  // bytes per second
     pub container_name: Option<String>,
+    pub user_name: Option<String>,
     pub has_alert: bool,
     pub sent_history: Vec<(f64, f64)>,
     pub received_history: Vec<(f64, f64)>,
@@ -56,6 +57,7 @@ pub struct ProcessInfoFormatted {
     pub received_rate_bytes: u64,
     pub received_rate_formatted: String,
     pub container_name: Option<String>,
+    pub user_name: Option<String>,
 }
 
 impl From<&ProcessInfo> for ProcessInfoFormatted {
@@ -71,6 +73,7 @@ impl From<&ProcessInfo> for ProcessInfoFormatted {
             received_rate_bytes: info.received_rate,
             received_rate_formatted: format!("{}/s", format_bytes(info.received_rate)),
             container_name: info.container_name.clone(),
+            user_name: info.user_name.clone(),
         }
     }
 }
@@ -80,6 +83,7 @@ pub struct ProcessIdentifier {
     pub pid: i32,
     pub name: String,
     pub container_name: Option<String>,
+    pub user_name: Option<String>,
 }
 
 #[derive(PartialEq)]
@@ -95,6 +99,7 @@ pub enum SortColumn {
     Sent,
     Received,
     Container,
+    User,
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -225,6 +230,7 @@ impl App {
             SortColumn::Sent => sorted.sort_by_key(|(_, info)| info.sent),
             SortColumn::Received => sorted.sort_by_key(|(_, info)| info.received),
             SortColumn::Container => sorted.sort_by_key(|(_, info)| &info.container_name),
+            SortColumn::User => sorted.sort_by_key(|(_, info)| &info.user_name),
         }
 
         if self.sort_direction == SortDirection::Desc {
@@ -233,8 +239,6 @@ impl App {
 
         sorted
     }
-
-
 
     pub fn update_system_stats(&mut self) {
         // Store previous stats for rate calculation

@@ -60,6 +60,47 @@ pub fn extract_container_name(pid: i32) -> Option<String> {
     None
 }
 
+pub fn extract_user_name(pid: i32) -> Option<String> {
+    // Read /proc/[PID]/status to get UID information
+    let status_path = format!("/proc/{}/status", pid);
+    
+    if let Ok(status_content) = std::fs::read_to_string(&status_path) {
+        for line in status_content.lines() {
+            if line.starts_with("Uid:") {
+                // Uid line format: "Uid:	real	effective	saved	filesystem"
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 2 {
+                    if let Ok(uid) = parts[1].parse::<u32>() {
+                        // Try to get username from UID
+                        return get_username_from_uid(uid);
+                    }
+                }
+                break;
+            }
+        }
+    }
+    None
+}
+
+fn get_username_from_uid(uid: u32) -> Option<String> {
+    // Try to read /etc/passwd to map UID to username
+    if let Ok(passwd_content) = std::fs::read_to_string("/etc/passwd") {
+        for line in passwd_content.lines() {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() >= 3 {
+                if let Ok(file_uid) = parts[2].parse::<u32>() {
+                    if file_uid == uid {
+                        return Some(parts[0].to_string());
+                    }
+                }
+            }
+        }
+    }
+    
+    // Fallback: return UID as string if username lookup fails
+    Some(uid.to_string())
+}
+
 pub fn refresh_proc_maps(containers_mode: bool) -> (HashMap<u64, ProcessIdentifier>, HashMap<Connection, u64>) {
     let mut inode_to_pid_map: HashMap<u64, ProcessIdentifier> = HashMap::new();
     let mut connection_to_inode_map: HashMap<Connection, u64> = HashMap::new();
@@ -73,6 +114,7 @@ pub fn refresh_proc_maps(containers_mode: bool) -> (HashMap<u64, ProcessIdentifi
                 } else {
                     None
                 };
+                let user_name = extract_user_name(p.pid);
                 
                 if let Ok(fds) = p.fd() {
                     for fd in fds {
@@ -82,6 +124,7 @@ pub fn refresh_proc_maps(containers_mode: bool) -> (HashMap<u64, ProcessIdentifi
                                     pid: p.pid, 
                                     name: name.clone(),
                                     container_name: container_name.clone(),
+                                    user_name: user_name.clone(),
                                 });
                             }
                         }

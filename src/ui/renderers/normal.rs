@@ -41,9 +41,9 @@ pub fn render(f: &mut Frame, app: &App) {
     };
 
     let navigation_text = if app.containers_mode {
-        "q: quit | Tab: switch mode | p/n/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
+        "q: quit | Tab: switch mode | p/n/u/s/r/c: sort | d: direction | ↑/↓: select | Enter: actions"
     } else {
-        "q: quit | Tab: switch mode | p/n/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
+        "q: quit | Tab: switch mode | p/n/u/s/r: sort | d: direction | ↑/↓: select | Enter: actions"
     };
     let title = Paragraph::new(navigation_text)
         .block(Block::default().title("Monitetoring").borders(Borders::ALL));
@@ -93,15 +93,15 @@ pub fn render(f: &mut Frame, app: &App) {
 fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let header_titles_str = if app.show_total_columns {
         if app.containers_mode {
-            vec!["(P)ID", "Name", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot", "(C)ontainer"]
+            vec!["(P)ID", "Name", "(U)ser", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot", "(C)ontainer"]
         } else {
-            vec!["(P)ID", "Name", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot"]
+            vec!["(P)ID", "Name", "(U)ser", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot"]
         }
     } else {
         if app.containers_mode {
-            vec!["(P)ID", "Name", "Sent/s", "Recv/s", "(C)ontainer"]
+            vec!["(P)ID", "Name", "(U)ser", "Sent/s", "Recv/s", "(C)ontainer"]
         } else {
-            vec!["(P)ID", "Name", "Sent/s", "Recv/s"]
+            vec!["(P)ID", "Name", "(U)ser", "Sent/s", "Recv/s"]
         }
     };
     let mut header_titles: Vec<String> = header_titles_str.iter().map(|s| s.to_string()).collect();
@@ -110,16 +110,17 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     match app.sort_by {
         SortColumn::Pid => header_titles[0].push_str(sort_indicator),
         SortColumn::Name => header_titles[1].push_str(sort_indicator),
-        SortColumn::Sent => header_titles[2].push_str(sort_indicator),
+        SortColumn::User => header_titles[2].push_str(sort_indicator),
+        SortColumn::Sent => header_titles[3].push_str(sort_indicator),
         SortColumn::Received => {
             if app.show_total_columns {
-                header_titles[4].push_str(sort_indicator);
+                header_titles[5].push_str(sort_indicator);
             } else {
-                header_titles[3].push_str(sort_indicator);
+                header_titles[4].push_str(sort_indicator);
             }
         },
         SortColumn::Container if app.containers_mode => {
-            let container_idx = if app.show_total_columns { 6 } else { 4 };
+            let container_idx = if app.show_total_columns { 7 } else { 5 };
             header_titles[container_idx].push_str(sort_indicator);
         },
         _ => {}
@@ -146,6 +147,7 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 vec![
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
+                    Cell::from(data.user_name.as_ref().unwrap_or(&"unknown".to_string()).clone()),
                     Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
                     Cell::from(format_bytes(data.sent)),
                     Cell::from(format!("{}/s", format_bytes(data.received_rate))),
@@ -156,6 +158,7 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 vec![
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
+                    Cell::from(data.user_name.as_ref().unwrap_or(&"unknown".to_string()).clone()),
                     Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
                     Cell::from(format_bytes(data.sent)),
                     Cell::from(format!("{}/s", format_bytes(data.received_rate))),
@@ -167,6 +170,7 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 vec![
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
+                    Cell::from(data.user_name.as_ref().unwrap_or(&"unknown".to_string()).clone()),
                     Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
                     Cell::from(format!("{}/s", format_bytes(data.received_rate))),
                     Cell::from(data.container_name.as_ref().unwrap_or(&"host".to_string()).clone()),
@@ -175,6 +179,7 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 vec![
                     Cell::from(pid.to_string()),
                     Cell::from(data.name.clone()),
+                    Cell::from(data.user_name.as_ref().unwrap_or(&"unknown".to_string()).clone()),
                     Cell::from(format!("{}/s", format_bytes(data.sent_rate))),
                     Cell::from(format!("{}/s", format_bytes(data.received_rate))),
                 ]
@@ -188,6 +193,7 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             [
                 Constraint::Percentage(10),
                 Constraint::Percentage(20),
+                Constraint::Percentage(10),
                 Constraint::Percentage(15),
                 Constraint::Percentage(15),
                 Constraint::Percentage(15),
@@ -199,9 +205,9 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             [
                 Constraint::Percentage(15),
                 Constraint::Percentage(25),
+                Constraint::Percentage(10),
                 Constraint::Percentage(20),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
+                Constraint::Percentage(10),
                 Constraint::Percentage(20),
             ]
             .as_slice()
@@ -209,19 +215,21 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     } else {
         if app.containers_mode {
             [
-                Constraint::Percentage(20),
-                Constraint::Percentage(40),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
+                Constraint::Percentage(15),  // PID
+                Constraint::Percentage(30),  // Name
+                Constraint::Percentage(15),  // User
+                Constraint::Percentage(20),  // Sent/s
+                Constraint::Percentage(20),  // Recv/s
+                Constraint::Percentage(15),  // Container
             ]
             .as_slice()
         } else {
             [
-                Constraint::Percentage(20),
-                Constraint::Percentage(40),
-                Constraint::Percentage(20),
-                Constraint::Percentage(20),
+                Constraint::Percentage(15),  // PID
+                Constraint::Percentage(35),  // Name  
+                Constraint::Percentage(15),  // User
+                Constraint::Percentage(17),  // Sent/s
+                Constraint::Percentage(18),  // Recv/s
             ]
             .as_slice()
         }

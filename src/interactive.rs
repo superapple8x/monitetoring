@@ -2,20 +2,6 @@ use std::io::{self, Write};
 use pcap::Device;
 use crate::config::{SavedConfig, load_config, save_config};
 
-#[derive(Debug)]
-pub enum InteractiveError {
-    Io(io::Error),
-    UserCancelled,
-    NoInterfacesFound,
-    PermissionDenied,
-}
-
-impl From<io::Error> for InteractiveError {
-    fn from(error: io::Error) -> Self {
-        InteractiveError::Io(error)
-    }
-}
-
 pub struct InteractiveConfig {
     pub interface: String,
     pub json_mode: bool,
@@ -72,6 +58,34 @@ impl InputHandler {
                         println!("❌ Invalid selection. Please enter a number between {} and {} (or 0 to quit).", min, max);
                     } else {
                         println!("❌ Invalid selection. Please enter a number between {} and {}.", min, max);
+                    }
+                    println!();
+                }
+            }
+        }
+    }
+
+    /// Prompts user for a numeric choice with a default value when Enter is pressed
+    fn numeric_choice_prompt_with_default(prompt: &str, min: usize, max: usize, default: usize) -> Result<Option<usize>, io::Error> {
+        loop {
+            print!("{} [{}]: ", prompt, default);
+            io::stdout().flush()?;
+
+            let input = Self::get_input()?;
+            
+            if input.is_empty() {
+                // Return default when Enter is pressed without input
+                return Ok(Some(default));
+            }
+            
+            match input.parse::<usize>() {
+                Ok(0) if min == 0 => return Ok(None), // Quit option
+                Ok(n) if n >= min && n <= max => return Ok(Some(n)),
+                _ => {
+                    if min == 0 {
+                        println!("❌ Invalid selection. Please enter a number between {} and {} (or 0 to quit), or press Enter for default ({}).", min, max, default);
+                    } else {
+                        println!("❌ Invalid selection. Please enter a number between {} and {}, or press Enter for default ({}).", min, max, default);
                     }
                     println!();
                 }
@@ -287,7 +301,7 @@ fn choose_mode() -> Result<(bool, bool), io::Error> {
         println!("   2. JSON output - Single 5-second capture for automation");
         println!();
         
-        let json_mode = match InputHandler::numeric_choice_prompt("📊 Select mode (1-2)", 1, 2)? {
+        let json_mode = match InputHandler::numeric_choice_prompt_with_default("📊 Select mode (1-2)", 1, 2, 1)? {
             Some(1) => false,
             Some(2) => true,
             _ => {

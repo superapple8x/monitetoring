@@ -33,7 +33,7 @@ fn display_startup_info(iface: &str, is_json: bool, containers_enabled: bool) {
     if !is_json {
         eprintln!("⏱️  Preparing to capture network traffic... (Press 'q' to quit)");
         eprintln!();
-        eprintln!("🎯 Tip: Press 'p' for PID, 'n' for Name, 's' for Sent, 'r' for Received{}", 
+        eprintln!("🎯 Tip: Press 'p' for PID, 'n' for Name, 'u' for User, 's' for Sent, 'r' for Received{}", 
                  if containers_enabled { ", 'c' for Container" } else { "" });
         eprintln!("📊 Sorting: Higher bandwidth usage appears at the top");
         eprintln!();
@@ -317,6 +317,7 @@ async fn main() -> Result<(), io::Error> {
                                 sent_rate: 0,
                                 received_rate: 0,
                                 container_name: proc_identifier.container_name.clone(),
+                                user_name: proc_identifier.user_name.clone(),
                                 has_alert: false, // Default value
                                 sent_history: Vec::new(),
                                 received_history: Vec::new(),
@@ -417,6 +418,7 @@ async fn main() -> Result<(), io::Error> {
                         sent_rate: 0,
                         received_rate: 0,
                         container_name: new_info.container_name.clone(),
+                        user_name: new_info.user_name.clone(),
                         has_alert,
                         sent_history: Vec::new(),
                         received_history: Vec::new(),
@@ -427,6 +429,7 @@ async fn main() -> Result<(), io::Error> {
                     stats.received_rate = new_info.received_rate;
                     stats.name = new_info.name;
                     stats.container_name = new_info.container_name;
+                    stats.user_name = new_info.user_name;
                     stats.has_alert = has_alert;
 
                     let now = app.start_time.elapsed().as_secs_f64();
