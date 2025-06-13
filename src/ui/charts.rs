@@ -220,8 +220,40 @@ pub fn update_chart_datasets(app: &mut App) {
         Color::LightMagenta, Color::LightCyan, Color::DarkGray, Color::Gray, Color::White
     ];
 
+    // ----------------------------------------------------------------------------------
+    // Build chart datasets in a single pass over history for all top PIDs (O(H + E))
+    // ----------------------------------------------------------------------------------
+    use std::collections::HashMap;
+
+    // Prepare structures for fast lookup & storage
+    let top_pid_set: HashSet<i32> = top_pids.iter().map(|(pid, _)| *pid).collect();
+    let mut data_map: HashMap<i32, Vec<(f64, f64)>> = top_pid_set
+        .iter()
+        .map(|pid| (*pid, Vec::with_capacity(app.system_bandwidth_history.len())))
+        .collect();
+
+    // Iterate once over the historical snapshots
+    for (timestamp, snapshot) in &app.system_bandwidth_history {
+        // First push default 0 for every tracked pid so vector lengths stay aligned
+        for &pid in &top_pid_set {
+            data_map.get_mut(&pid).unwrap().push((*timestamp, 0.0));
+        }
+        // Update with real values where available
+        for (pid, sent, recv) in snapshot {
+            if top_pid_set.contains(pid) {
+                let value = match app.metrics_mode {
+                    MetricsMode::Combined => sent + recv,
+                    MetricsMode::SendOnly => *sent,
+                    MetricsMode::ReceiveOnly => *recv,
+                };
+                if let Some(entry) = data_map.get_mut(pid).and_then(|v| v.last_mut()) {
+                    entry.1 = value;
+                }
+            }
+        }
+    }
+
     for (pid, process_name) in top_pids {
-        // Get or assign a persistent color for this process
         let process_color = if let Some(&existing_color) = app.process_colors.get(&process_name) {
             existing_color
         } else {
@@ -231,32 +263,16 @@ pub fn update_chart_datasets(app: &mut App) {
                 .find(|&&color| !used_colors.contains(&color))
                 .copied()
                 .unwrap_or(AVAILABLE_COLORS[app.process_colors.len() % AVAILABLE_COLORS.len()]);
-            
             app.process_colors.insert(process_name.clone(), new_color);
             new_color
         };
 
-        // Optimized data extraction with pre-allocated capacity
-        let mut process_data = Vec::with_capacity(app.system_bandwidth_history.len());
-        
-        for (timestamp, snapshot) in &app.system_bandwidth_history {
-            let rate = snapshot.iter()
-                .find(|(p, _, _)| *p == pid)
-                .map(|(_, sent, recv)| {
-                    match app.metrics_mode {
-                        MetricsMode::Combined => sent + recv,
-                        MetricsMode::SendOnly => *sent,
-                        MetricsMode::ReceiveOnly => *recv,
-                    }
-                })
-                .unwrap_or(0.0);
-            process_data.push((*timestamp, rate));
-        }
-
-        if !process_data.is_empty() {
-            new_datasets.push((process_name, process_data, process_color));
+        if let Some(process_data) = data_map.remove(&pid) {
+            if !process_data.is_empty() {
+                new_datasets.push((process_name, process_data, process_color));
+            }
         }
     }
-    
+
     app.chart_datasets = new_datasets;
 } 
