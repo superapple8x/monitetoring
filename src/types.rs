@@ -96,8 +96,10 @@ pub enum SortDirection {
 pub enum SortColumn {
     Pid,
     Name,
-    Sent,
-    Received,
+    Sent,        // Total sent bytes
+    SentRate,    // Sent bytes per second
+    Received,    // Total received bytes
+    ReceivedRate, // Received bytes per second
     Container,
     User,
 }
@@ -228,7 +230,9 @@ impl App {
             SortColumn::Pid => sorted.sort_by_key(|(pid, _)| *pid),
             SortColumn::Name => sorted.sort_by_key(|(_, info)| &info.name),
             SortColumn::Sent => sorted.sort_by_key(|(_, info)| info.sent),
+            SortColumn::SentRate => sorted.sort_by_key(|(_, info)| info.sent_rate),
             SortColumn::Received => sorted.sort_by_key(|(_, info)| info.received),
+            SortColumn::ReceivedRate => sorted.sort_by_key(|(_, info)| info.received_rate),
             SortColumn::Container => sorted.sort_by_key(|(_, info)| &info.container_name),
             SortColumn::User => sorted.sort_by_key(|(_, info)| &info.user_name),
         }

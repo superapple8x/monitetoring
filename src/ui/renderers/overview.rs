@@ -36,7 +36,7 @@ fn render_title(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
     f.render_widget(block, area);
 
     // Navigation guide paragraph rendered inside the block
-    let nav_text = "q: quit | Tab: Switch Mode | +/-: adjust quota | r: reset";
+    let nav_text = "q: quit | Tab: switch mode | +/-: adjust quota | r: reset";
     let nav_paragraph = Paragraph::new(nav_text);
     f.render_widget(nav_paragraph, inner);
 }

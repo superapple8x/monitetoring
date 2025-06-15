@@ -68,8 +68,6 @@ fn render_process_lines_view(f: &mut Frame, app: &App, terminal_height: u16) {
     render_totals_bar(f, app, main_chunks[3]);
 }
 
-
-
 /// Render the title bar for bandwidth mode with adaptive messaging
 fn render_title(f: &mut Frame, area: ratatui::layout::Rect, terminal_height: u16, app: &App) {
     let navigation_text = if terminal_height < 20 {
@@ -98,8 +96,6 @@ fn render_title(f: &mut Frame, area: ratatui::layout::Rect, terminal_height: u16
         .block(Block::default().title(title_text).borders(Borders::ALL));
     f.render_widget(title, area);
 }
-
-
 
 /// Render the top 5 processes table for SystemStacked view
 fn render_top5_processes_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
@@ -195,9 +191,9 @@ fn render_compact_process_table(f: &mut Frame, app: &App, area: ratatui::layout:
     
     // Use compact headers for this limited space
     let header_titles_str = if app.containers_mode {
-        vec!["PID", "Name", "Sent/s", "Recv/s", "Container"]
+        vec!["(P)ID", "(N)ame", "Sent/s", "Recv/s", "(C)ontainer"]
     } else {
-        vec!["PID", "Name", "Sent/s", "Recv/s"]
+        vec!["(P)ID", "(N)ame", "Sent/s", "Recv/s"]
     };
     
     let mut header_titles: Vec<String> = header_titles_str.iter().map(|s| s.to_string()).collect();
@@ -207,7 +203,9 @@ fn render_compact_process_table(f: &mut Frame, app: &App, area: ratatui::layout:
         SortColumn::Pid => header_titles[0].push_str(sort_indicator),
         SortColumn::Name => header_titles[1].push_str(sort_indicator),
         SortColumn::Sent => header_titles[2].push_str(sort_indicator),
+        SortColumn::SentRate => header_titles[2].push_str(sort_indicator),
         SortColumn::Received => header_titles[3].push_str(sort_indicator),
+        SortColumn::ReceivedRate => header_titles[3].push_str(sort_indicator),
         SortColumn::Container if app.containers_mode => header_titles[4].push_str(sort_indicator),
         _ => {}
     }

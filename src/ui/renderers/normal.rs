@@ -93,15 +93,15 @@ pub fn render(f: &mut Frame, app: &App) {
 fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let header_titles_str = if app.show_total_columns {
         if app.containers_mode {
-            vec!["(P)ID", "Name", "(U)ser", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot", "(C)ontainer"]
+            vec!["(P)ID", "(N)ame", "(U)ser", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot", "(C)ontainer"]
         } else {
-            vec!["(P)ID", "Name", "(U)ser", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot"]
+            vec!["(P)ID", "(N)ame", "(U)ser", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot"]
         }
     } else {
         if app.containers_mode {
-            vec!["(P)ID", "Name", "(U)ser", "Sent/s", "Recv/s", "(C)ontainer"]
+            vec!["(P)ID", "(N)ame", "(U)ser", "Sent/s", "Recv/s", "(C)ontainer"]
         } else {
-            vec!["(P)ID", "Name", "(U)ser", "Sent/s", "Recv/s"]
+            vec!["(P)ID", "(N)ame", "(U)ser", "Sent/s", "Recv/s"]
         }
     };
     let mut header_titles: Vec<String> = header_titles_str.iter().map(|s| s.to_string()).collect();
@@ -111,12 +111,28 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         SortColumn::Pid => header_titles[0].push_str(sort_indicator),
         SortColumn::Name => header_titles[1].push_str(sort_indicator),
         SortColumn::User => header_titles[2].push_str(sort_indicator),
-        SortColumn::Sent => header_titles[3].push_str(sort_indicator),
+        SortColumn::Sent => {
+            if app.show_total_columns {
+                header_titles[4].push_str(sort_indicator); // (S)Tot column
+            } else {
+                header_titles[3].push_str(sort_indicator); // Sent/s column when totals not shown
+            }
+        },
+        SortColumn::SentRate => {
+            header_titles[3].push_str(sort_indicator); // Sent/s column
+        },
         SortColumn::Received => {
             if app.show_total_columns {
-                header_titles[5].push_str(sort_indicator);
+                header_titles[6].push_str(sort_indicator); // (R)Tot column
             } else {
-                header_titles[4].push_str(sort_indicator);
+                header_titles[4].push_str(sort_indicator); // Recv/s column when totals not shown
+            }
+        },
+        SortColumn::ReceivedRate => {
+            if app.show_total_columns {
+                header_titles[5].push_str(sort_indicator); // Recv/s column
+            } else {
+                header_titles[4].push_str(sort_indicator); // Recv/s column when totals not shown
             }
         },
         SortColumn::Container if app.containers_mode => {

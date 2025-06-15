@@ -192,8 +192,32 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Char('p') => app.sort_by = SortColumn::Pid,
         KeyCode::Char('n') => app.sort_by = SortColumn::Name,
         KeyCode::Char('u') => app.sort_by = SortColumn::User,
-        KeyCode::Char('s') => app.sort_by = SortColumn::Sent,
-        KeyCode::Char('r') => app.sort_by = SortColumn::Received,
+        KeyCode::Char('s') => {
+            if app.show_total_columns {
+                // Cycle between Sent (total) and SentRate when total columns are shown
+                app.sort_by = match app.sort_by {
+                    SortColumn::Sent => SortColumn::SentRate,
+                    SortColumn::SentRate => SortColumn::Sent,
+                    _ => SortColumn::Sent, // Default to total sent
+                };
+            } else {
+                // When total columns are not shown, sort by rate (which is the only sent data visible)
+                app.sort_by = SortColumn::SentRate;
+            }
+        },
+        KeyCode::Char('r') => {
+            if app.show_total_columns {
+                // Cycle between Received (total) and ReceivedRate when total columns are shown
+                app.sort_by = match app.sort_by {
+                    SortColumn::Received => SortColumn::ReceivedRate,
+                    SortColumn::ReceivedRate => SortColumn::Received,
+                    _ => SortColumn::Received, // Default to total received
+                };
+            } else {
+                // When total columns are not shown, sort by rate (which is the only received data visible)
+                app.sort_by = SortColumn::ReceivedRate;
+            }
+        },
         KeyCode::Char('c') => {
             if app.containers_mode {
                 app.sort_by = SortColumn::Container;
