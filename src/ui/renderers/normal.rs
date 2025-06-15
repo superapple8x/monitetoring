@@ -207,24 +207,25 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let widths = if app.show_total_columns {
         if app.containers_mode {
             [
-                Constraint::Percentage(10),
-                Constraint::Percentage(20),
-                Constraint::Percentage(10),
-                Constraint::Percentage(15),
-                Constraint::Percentage(15),
-                Constraint::Percentage(15),
-                Constraint::Percentage(15),
-                Constraint::Percentage(10),
+                Constraint::Percentage(8),   // PID
+                Constraint::Percentage(18),  // Name
+                Constraint::Percentage(8),   // User
+                Constraint::Percentage(12),  // Sent/s
+                Constraint::Percentage(12),  // (S)Tot
+                Constraint::Percentage(12),  // Recv/s
+                Constraint::Percentage(12),  // (R)Tot
+                Constraint::Percentage(18),  // Container
             ]
             .as_slice()
         } else {
             [
-                Constraint::Percentage(15),
-                Constraint::Percentage(25),
-                Constraint::Percentage(10),
-                Constraint::Percentage(20),
-                Constraint::Percentage(10),
-                Constraint::Percentage(20),
+                Constraint::Percentage(12),  // PID
+                Constraint::Percentage(20),  // Name
+                Constraint::Percentage(10),  // User
+                Constraint::Percentage(14),  // Sent/s
+                Constraint::Percentage(14),  // (S)Tot
+                Constraint::Percentage(15),  // Recv/s
+                Constraint::Percentage(15),  // (R)Tot
             ]
             .as_slice()
         }
