@@ -16,3 +16,17 @@ serde_json = "1.0"
 dirs = "5.0"
 nix = { version = "0.28.0", features = ["signal"] }
 chrono = { version = "0.4", features = ["serde"] }
+
+# Optimization profiles
+[profile.release]
+# Enable Link-Time Optimization for smaller binary size and better performance
+lto = true
+# Use single codegen unit for better optimization (slower compile, better runtime)
+codegen-units = 1
+
+# Developer-friendly profile with optimizations but without LTO
+# Usage: cargo build --profile optimized-dev
+[profile.optimized-dev]
+inherits = "release"
+lto = false
+codegen-units = 16  # Default value for faster compilation
