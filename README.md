@@ -26,7 +26,7 @@ A real-time per-process network bandwidth monitoring tool for Linux, inspired by
 
 **Bandwidth – Process Lines**
 
-![Process Bandwidth](doc/bandwith_process.png)
+![Process Bandwidth](doc/bandwidth_process.png)
 
 **System Overview**
 
@@ -71,6 +71,9 @@ git clone https://github.com/superapple8x/monitetoring
 cd monitetoring
 cargo build --release
 sudo cp target/release/monitetoring /usr/local/bin/
+
+# Optional: Create the shorter 'monto' alias
+sudo ln -s /usr/local/bin/monitetoring /usr/local/bin/monto
 ```
 
 ### Manual Installation
@@ -83,10 +86,14 @@ cargo build --release
 
 # Install to system (requires sudo)
 sudo cp target/release/monitetoring /usr/local/bin/
+# Optional: Create the shorter 'monto' alias
+sudo ln -s /usr/local/bin/monitetoring /usr/local/bin/monto
 
 # Or install to user directory (no sudo needed)
 mkdir -p ~/.local/bin
 cp target/release/monitetoring ~/.local/bin/
+# Optional: Create the shorter 'monto' alias
+ln -s ~/.local/bin/monitetoring ~/.local/bin/monto
 # Make sure ~/.local/bin is in your PATH
 ```
 
@@ -112,6 +119,8 @@ sudo cargo run
 
 # If installed system-wide
 sudo monitetoring
+# Or use the shorter alias
+sudo monto
 ```
 
 This will:
@@ -129,6 +138,12 @@ sudo monitetoring --interface any
 sudo monitetoring --interface eth0 --json
 sudo monitetoring --interface eth0 --containers
 sudo monitetoring --reset
+
+# Or use the shorter 'monto' alias
+sudo monto --interface any
+sudo monto --interface eth0 --json
+sudo monto --interface eth0 --containers
+sudo monto --reset
 
 # From source (development)
 sudo cargo run -- --interface any
@@ -233,6 +248,8 @@ sudo cargo run -- --interface eth0 --json --containers
 
 # If installed system-wide
 sudo monitetoring --interface eth0 --json --containers
+# Or use the shorter alias
+sudo monto --interface eth0 --json --containers
 ```
 
 ```json
@@ -289,6 +306,8 @@ sudo cargo run -- --reset
 
 # If installed system-wide
 sudo monitetoring --reset
+# Or use the shorter alias
+sudo monto --reset
 ```
 
 ## Technical Details

@@ -189,6 +189,13 @@ fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
 fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
     match key {
         KeyCode::Char('q') => return true,
+        KeyCode::Esc => {
+            // Dismiss notification boxes when Esc is pressed
+            if app.last_alert_message.is_some() || !app.command_execution_log.is_empty() {
+                app.last_alert_message = None;
+                app.command_execution_log.clear();
+            }
+        },
         KeyCode::Char('p') => app.sort_by = SortColumn::Pid,
         KeyCode::Char('n') => app.sort_by = SortColumn::Name,
         KeyCode::Char('u') => app.sort_by = SortColumn::User,

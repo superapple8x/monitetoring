@@ -74,12 +74,16 @@ pub fn render(f: &mut Frame, app: &App) {
     };
 
     // Adaptive table/action panel layout based on terminal height and available space
-    let action_panel_height = if is_cramped { 
-        // In cramped conditions, give more space to action panel
-        if app.show_action_panel { 30 } else { 0 }
-    } else {
-        // Normal conditions
-        if app.show_action_panel { 20 } else { 0 }
+    let action_panel_height = if app.show_action_panel {
+        if is_cramped { 
+            // In cramped conditions, give much more space to action panel
+            40 
+        } else {
+            // Normal conditions, but still give more space than before
+            25 
+        }
+    } else { 
+        0 
     };
     
     let table_chunks = Layout::default()
@@ -303,7 +307,7 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is
             actions.push("Remove Alert");
         }
 
-        if is_cramped && area.width > 50 {
+        if (is_cramped || area.height < 6) && area.width > 50 {
             // Horizontal layout for cramped vertical space but sufficient horizontal space
             let selected_action_text = actions.get(app.selected_action).unwrap_or(&"Unknown");
             
@@ -313,7 +317,7 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is
                 .enumerate()
                 .map(|(i, action)| {
                     if i == app.selected_action {
-                        format!(">[{}]<", action)
+                        format!(">{}<", action)
                     } else {
                         format!(" {} ", action)
                     }
@@ -322,16 +326,14 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is
                 .join(" | ");
             
             let mut text = Text::from(vec![
-                Line::from(format!("Actions for PID {}: ←/→ arrows or ↑/↓", pid)),
                 Line::from(Span::styled(
                     action_text,
                     Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
                 )),
-                Line::from(format!("Selected: {}", selected_action_text)),
             ]);
             text
         } else {
-            // Vertical layout (original behavior)
+            // Vertical layout (original behavior) - but ensure all options are visible
             let action_lines: Vec<Line> = actions
                 .iter()
                 .enumerate()
@@ -347,19 +349,34 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is
                 })
                 .collect();
 
-            let mut text = Text::from(vec![Line::from(format!("Actions for PID {}:", pid))]);
-            text.extend(action_lines);
-            text
+            let mut text_lines = action_lines;
+            
+            // Add a current selection indicator if we have limited space
+            if area.height < 6 {
+                let selected_action_text = actions.get(app.selected_action).unwrap_or(&"Unknown");
+                text_lines.push(Line::from(Span::styled(
+                    format!(">> {}", selected_action_text),
+                    Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow),
+                )));
+            }
+            
+            Text::from(text_lines)
         }
     } else {
         Text::from("No process selected")
     };
 
+    let title = if let Some(pid) = app.selected_process {
+        format!("Actions for PID {} (Esc to close)", pid)
+    } else {
+        "Actions (Esc to close)".to_string()
+    };
+    
     let action_panel = Paragraph::new(action_panel_text)
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title(if is_cramped { "Actions (Esc: close)" } else { "Actions (Esc to close)" })
+                .title(title)
                 .style(Style::default().bg(Color::DarkGray))
         );
     f.render_widget(action_panel, area);
@@ -392,7 +409,7 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
                 .constraints([Constraint::Length(3), Constraint::Length(3)].as_ref())
                 .split(area);
 
-            // Command execution box
+            // Command execution box (top box gets the dismiss guide)
             let elapsed = timestamp.elapsed().as_secs();
             let time_str = if elapsed < 60 { format!("{}s ago", elapsed) } else { format!("{}m ago", elapsed / 60) };
             let mut parts = log_msg.splitn(2, '\n');
@@ -400,15 +417,15 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let body = parts.next().unwrap_or("");
             let exec_paragraph = Paragraph::new(format!("{} ({})", body.trim(), time_str))
                 .style(Style::default().fg(Color::Cyan))
-                .block(Block::default().borders(Borders::ALL).title(header));
+                .block(Block::default().borders(Borders::ALL).title(format!("{} (Esc to dismiss)", header)));
             f.render_widget(exec_paragraph, chunks[0]);
 
-            // Alert message box
-            let alert_paragraph = format_alert_message(msg);
+            // Alert message box (no dismiss guide since top box has it)
+            let alert_paragraph = format_alert_message(msg, false);
             f.render_widget(alert_paragraph, chunks[1]);
         } else {
             // Only alert message
-            let alert_paragraph = format_alert_message(msg);
+            let alert_paragraph = format_alert_message(msg, true);
             f.render_widget(alert_paragraph, area);
         }
     } else if let Some((timestamp, log_msg)) = recent_log_entry {
@@ -419,22 +436,32 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         let body = parts.next().unwrap_or("");
         let exec_paragraph = Paragraph::new(format!("{} ({})", body.trim(), time_str))
             .style(Style::default().fg(Color::Cyan))
-            .block(Block::default().borders(Borders::ALL).title(header));
+            .block(Block::default().borders(Borders::ALL).title(format!("{} (Esc to dismiss)", header)));
         f.render_widget(exec_paragraph, area);
     }
     // If no messages to show, leave the space empty (removed the "No Action Executed" box)
 }
 
-fn format_alert_message(msg: &str) -> Paragraph {
+fn format_alert_message(msg: &str, show_dismiss_guide: bool) -> Paragraph {
     if let Some(pos) = msg.find(':') {
         let header = &msg[..=pos];
         let body = msg[pos + 1..].trim();
+        let title = if show_dismiss_guide {
+            format!("{} (Esc to dismiss)", header)
+        } else {
+            header.to_string()
+        };
         Paragraph::new(body)
             .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().borders(Borders::ALL).title(header))
+            .block(Block::default().borders(Borders::ALL).title(title))
     } else {
+        let title = if show_dismiss_guide {
+            "Alert (Esc to dismiss)".to_string()
+        } else {
+            "Alert".to_string()
+        };
         Paragraph::new(msg)
             .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().borders(Borders::ALL).title("Alert"))
+            .block(Block::default().borders(Borders::ALL).title(title))
     }
 } 
