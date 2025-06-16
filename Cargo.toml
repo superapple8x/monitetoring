@@ -2,6 +2,13 @@
 name = "monitetoring"
 version = "0.1.6"
 edition = "2024"
+license = "GPL-2.0"
+description = "A real-time per-process network bandwidth monitoring tool for Linux, inspired by nethogs. Built with Rust and featuring a terminal UI powered by ratatui."
+homepage = "https://github.com/superapple8x/monitetoring"
+repository = "https://github.com/superapple8x/monitetoring"
+readme = "README.md"
+keywords = ["network", "monitoring", "bandwidth", "linux", "tui"]
+categories = ["command-line-utilities", "network-programming"]
 
 [dependencies]
 pcap = "2.2.0"
