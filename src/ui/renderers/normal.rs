@@ -309,8 +309,6 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is
 
         if (is_cramped || area.height < 6) && area.width > 50 {
             // Horizontal layout for cramped vertical space but sufficient horizontal space
-            let selected_action_text = actions.get(app.selected_action).unwrap_or(&"Unknown");
-            
             // Create a horizontal list of actions with the selected one highlighted
             let action_text = actions
                 .iter()
@@ -325,13 +323,12 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is
                 .collect::<Vec<_>>()
                 .join(" | ");
             
-            let mut text = Text::from(vec![
+            Text::from(vec![
                 Line::from(Span::styled(
                     action_text,
                     Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
                 )),
-            ]);
-            text
+            ])
         } else {
             // Vertical layout (original behavior) - but ensure all options are visible
             let action_lines: Vec<Line> = actions

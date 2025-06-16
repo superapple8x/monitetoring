@@ -19,8 +19,8 @@ use nix::unistd::Pid;
 use nix::errno::Errno;
 
 use config::{Cli, reset_config, load_config};
-use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction, ChartType};
-use process::refresh_proc_maps;
+use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction, ChartType, PROCESS_CLEANUP_INTERVAL_SECS};
+use process::{refresh_proc_maps, cleanup_dead_processes, should_track_process};
 use capture::connection_from_packet;
 use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event, update_chart_datasets, utils::format_bytes};
 use interactive::run_interactive_mode;
@@ -310,7 +310,11 @@ async fn main() -> Result<(), io::Error> {
                         };
                         
                         if let Some(proc_identifier) = inode_map.get(&found_inode) {
-                            let stats = bandwidth_map.entry(proc_identifier.pid).or_insert(ProcessInfo {
+                            // Skip if this process is known to be dead (avoids constant re-adding)
+                            // Note: We'll refresh this cache periodically in the main loop
+                            let pid = proc_identifier.pid;
+                            
+                            let stats = bandwidth_map.entry(pid).or_insert(ProcessInfo {
                                 name: proc_identifier.name.clone(),
                                 sent: 0,
                                 received: 0,
@@ -403,10 +407,10 @@ async fn main() -> Result<(), io::Error> {
         
         loop {
             if let Ok(new_stats) = rx.try_recv() {
-                // Accumulate new data instead of replacing, but filter out killed processes
+                // Accumulate new data instead of replacing, but filter out killed and dead processes
                 for (pid, new_info) in new_stats {
-                    // Skip processes that have been killed
-                    if app.killed_processes.contains(&pid) {
+                    // Use comprehensive validation to check if we should track this process
+                    if !should_track_process(pid, &app.killed_processes, &app.dead_processes_cache) {
                         continue;
                     }
                     
@@ -505,6 +509,9 @@ async fn main() -> Result<(), io::Error> {
                                 processes_to_kill.push(*pid);
                             }
                             app.last_alert_message = message;
+                            if app.last_alert_message.is_some() {
+                                app.last_alert_message_time = Some(now);
+                            }
                             
                             // Set cooldown
                             app.alert_cooldowns.insert(*pid, now);
@@ -517,6 +524,42 @@ async fn main() -> Result<(), io::Error> {
             for pid in processes_to_kill {
                 app.killed_processes.insert(pid);
                 app.alert_cooldowns.remove(&pid);
+            }
+            
+            // Auto-dismiss alert messages after 5 seconds
+            if let Some(message_time) = app.last_alert_message_time {
+                if now.duration_since(message_time) >= Duration::from_secs(5) {
+                    app.last_alert_message = None;
+                    app.last_alert_message_time = None;
+                }
+            }
+            
+            // Periodic cleanup of dead processes
+            let should_cleanup = match app.last_cleanup_time {
+                Some(last_cleanup) => now.duration_since(last_cleanup) >= Duration::from_secs(PROCESS_CLEANUP_INTERVAL_SECS),
+                None => true, // First time, always cleanup
+            };
+            
+            if should_cleanup {
+                let removed_pids = cleanup_dead_processes(&mut app.stats, &app.killed_processes);
+                if !removed_pids.is_empty() {
+                    // Also remove alerts and cooldowns for dead processes
+                    for pid in &removed_pids {
+                        app.alerts.remove(pid);
+                        app.alert_cooldowns.remove(pid);
+                    }
+                    
+                    // Update dead processes cache to prevent re-adding
+                    app.dead_processes_cache.extend(&removed_pids);
+                    
+                    // Process cleanup now operates silently - no user notifications
+                }
+                app.last_cleanup_time = Some(now);
+                
+                // Periodically clear the dead processes cache to allow detection of reused PIDs
+                if app.dead_processes_cache.len() > 100 {
+                    app.dead_processes_cache.clear();
+                }
             }
             
             render_ui(&app, &mut terminal)?;

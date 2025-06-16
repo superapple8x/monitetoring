@@ -3,6 +3,9 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use ratatui::style::Color;
 
+// Process cleanup configuration
+pub const PROCESS_CLEANUP_INTERVAL_SECS: u64 = 5; // Check for dead processes every 5 seconds
+
 fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     const THRESHOLD: f64 = 1024.0;
@@ -148,6 +151,8 @@ pub struct App {
     pub killed_processes: HashSet<i32>,
     pub alert_cooldowns: HashMap<i32, Instant>,
     pub last_alert_message: Option<String>,
+    pub last_alert_message_time: Option<Instant>, // Track when the alert message was set
+    pub dead_processes_cache: HashSet<i32>, // Cache of known dead processes to avoid re-checking
     pub command_execution_log: Vec<(Instant, String)>, // Timestamped execution log
     pub bandwidth_mode: bool,
     pub system_bandwidth_history: Vec<(f64, Vec<(i32, f64, f64)>)>, // (timestamp, [(pid, sent_rate, received_rate)])
@@ -165,6 +170,7 @@ pub struct App {
     pub alert_scroll_offset: usize, // Scroll offset for alert progress bars
     // Performance optimization
     pub last_chart_update: Instant, // Last time chart datasets were updated
+    pub last_cleanup_time: Option<Instant>, // Last time processes were cleaned up
 }
 
 impl App {
@@ -188,6 +194,8 @@ impl App {
             killed_processes: HashSet::new(),
             alert_cooldowns: HashMap::new(),
             last_alert_message: None,
+            last_alert_message_time: None, // Track when the alert message was set
+            dead_processes_cache: HashSet::new(), // Cache of known dead processes to avoid re-checking
             command_execution_log: Vec::new(),
             bandwidth_mode: false,
             system_bandwidth_history: Vec::new(),
@@ -205,6 +213,7 @@ impl App {
             alert_scroll_offset: 0,
             // Performance optimization
             last_chart_update: Instant::now(),
+            last_cleanup_time: None,
         }
     }
 

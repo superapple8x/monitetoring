@@ -193,6 +193,7 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
             // Dismiss notification boxes when Esc is pressed
             if app.last_alert_message.is_some() || !app.command_execution_log.is_empty() {
                 app.last_alert_message = None;
+                app.last_alert_message_time = None;
                 app.command_execution_log.clear();
             }
         },

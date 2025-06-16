@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use crate::types::{Connection, ProcessIdentifier};
+use crate::types::{Connection, ProcessIdentifier, ProcessInfo};
 
 pub fn extract_container_name(pid: i32) -> Option<String> {
     // Read /proc/[PID]/cgroup to extract container information
@@ -191,4 +191,55 @@ pub fn refresh_proc_maps(containers_mode: bool) -> (HashMap<u64, ProcessIdentifi
     }
 
     (inode_to_pid_map, connection_to_inode_map)
+}
+
+/// Check if a process with the given PID is still alive
+pub fn is_process_alive(pid: i32) -> bool {
+    // Try to read /proc/[PID]/stat - if it fails, the process is dead
+    let stat_path = format!("/proc/{}/stat", pid);
+    std::fs::metadata(&stat_path).is_ok()
+}
+
+/// Clean up dead processes from the stats HashMap
+/// Returns a vector of PIDs that were removed
+pub fn cleanup_dead_processes(stats: &mut HashMap<i32, ProcessInfo>, killed_processes: &std::collections::HashSet<i32>) -> Vec<i32> {
+    let mut removed_pids = Vec::new();
+    
+    // Collect PIDs to remove (processes that are dead and not in killed_processes)
+    let pids_to_remove: Vec<i32> = stats.keys()
+        .filter(|&pid| {
+            // Don't remove processes that were intentionally killed by the tool
+            if killed_processes.contains(pid) {
+                return false;
+            }
+            // Remove if the process is no longer alive
+            !is_process_alive(*pid)
+        })
+        .cloned()
+        .collect();
+    
+    // Remove dead processes and track what was removed
+    for pid in pids_to_remove {
+        if stats.remove(&pid).is_some() {
+            removed_pids.push(pid);
+        }
+    }
+    
+    removed_pids
+}
+
+/// Validate if a process should be tracked (alive and not in exclusion sets)
+pub fn should_track_process(pid: i32, killed_processes: &std::collections::HashSet<i32>, dead_processes_cache: &std::collections::HashSet<i32>) -> bool {
+    // Don't track killed processes
+    if killed_processes.contains(&pid) {
+        return false;
+    }
+    
+    // Don't track processes we know are dead
+    if dead_processes_cache.contains(&pid) {
+        return false;
+    }
+    
+    // Final check: is the process actually alive?
+    is_process_alive(pid)
 } 
