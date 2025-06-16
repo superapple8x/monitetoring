@@ -117,12 +117,12 @@ fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
             app.show_action_panel = false;
             app.selected_action = 0;
         }
-        KeyCode::Up => {
+        KeyCode::Up | KeyCode::Left => {
             if app.selected_action > 0 {
                 app.selected_action -= 1;
             }
         }
-        KeyCode::Down => {
+        KeyCode::Down | KeyCode::Right => {
             if app.selected_action < num_actions - 1 {
                 app.selected_action += 1;
             }

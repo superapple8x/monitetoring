@@ -10,11 +10,14 @@ use crate::ui::{utils::format_bytes, charts::render_charts};
 
 /// Render the normal mode view
 pub fn render(f: &mut Frame, app: &App) {
+    let terminal_height = f.size().height;
+    let is_cramped = terminal_height < 25; // Detect if we're in a cramped terminal (raised threshold)
+    
     // Check if we have messages to show
     let recent_log_entry = app.command_execution_log.last();
     let has_messages = app.last_alert_message.is_some() || recent_log_entry.is_some();
     
-    // Adaptive layout based on whether we have messages to show
+    // Adaptive layout based on whether we have messages to show and if action panel is active
     let main_chunks = if has_messages {
         // When messages exist, allocate space for them
         Layout::default()
@@ -23,7 +26,11 @@ pub fn render(f: &mut Frame, app: &App) {
             .constraints([
                 Constraint::Length(3), // Navigation
                 Constraint::Min(0),    // Main content (Table + Action Panel)
-                Constraint::Length(3), // Totals
+                if app.show_action_panel { 
+                    Constraint::Length(0) // Hide totals when action panel is shown
+                } else { 
+                    Constraint::Length(3) // Totals
+                },
                 Constraint::Length(6), // Footer / Alert Message (space for dual messages)
             ])
             .split(f.size())
@@ -35,7 +42,11 @@ pub fn render(f: &mut Frame, app: &App) {
             .constraints([
                 Constraint::Length(3), // Navigation
                 Constraint::Min(0),    // Main content (Table + Action Panel) - expanded
-                Constraint::Length(3), // Totals
+                if app.show_action_panel { 
+                    Constraint::Length(0) // Hide totals when action panel is shown
+                } else { 
+                    Constraint::Length(3) // Totals
+                },
             ])
             .split(f.size())
     };
@@ -62,10 +73,22 @@ pub fn render(f: &mut Frame, app: &App) {
             .split(main_chunks[1])
     };
 
+    // Adaptive table/action panel layout based on terminal height and available space
+    let action_panel_height = if is_cramped { 
+        // In cramped conditions, give more space to action panel
+        if app.show_action_panel { 30 } else { 0 }
+    } else {
+        // Normal conditions
+        if app.show_action_panel { 20 } else { 0 }
+    };
+    
     let table_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(if app.show_action_panel {
-            vec![Constraint::Percentage(80), Constraint::Percentage(20)]
+            vec![
+                Constraint::Percentage(100 - action_panel_height), 
+                Constraint::Percentage(action_panel_height)
+            ]
         } else {
             vec![Constraint::Percentage(100)]
         })
@@ -74,18 +97,24 @@ pub fn render(f: &mut Frame, app: &App) {
     render_process_table(f, app, table_chunks[0]);
 
     if app.show_action_panel {
-        render_action_panel(f, app, table_chunks[1]);
+        render_action_panel(f, app, table_chunks[1], is_cramped);
     }
 
     if app.bandwidth_mode && content_chunks.len() > 1 {
         render_charts(f, app, content_chunks[1]);
     }
 
-    render_totals_bar(f, app, main_chunks[2]);
+    // Only render totals if action panel is not shown
+    if !app.show_action_panel {
+        render_totals_bar(f, app, main_chunks[2]);
+    }
     
     // Only render footer if we have messages to show
     if has_messages {
-        render_footer(f, app, main_chunks[3]);
+        let footer_index = if !app.show_action_panel { 3 } else { 2 };
+        if footer_index < main_chunks.len() {
+            render_footer(f, app, main_chunks[footer_index]);
+        }
     }
 }
 
@@ -267,31 +296,61 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 /// Render the action panel
-fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is_cramped: bool) {
     let action_panel_text = if let Some(pid) = app.selected_process {
         let mut actions = vec!["Kill Process", "Set/Edit Bandwidth Alert"];
         if app.alerts.contains_key(&pid) {
             actions.push("Remove Alert");
         }
 
-        let action_lines: Vec<Line> = actions
-            .iter()
-            .enumerate()
-            .map(|(i, action)| {
-                if i == app.selected_action {
-                    Line::from(Span::styled(
-                        format!("> {}", action),
-                        Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
-                    ))
-                } else {
-                    Line::from(format!("  {}", action))
-                }
-            })
-            .collect();
+        if is_cramped && area.width > 50 {
+            // Horizontal layout for cramped vertical space but sufficient horizontal space
+            let selected_action_text = actions.get(app.selected_action).unwrap_or(&"Unknown");
+            
+            // Create a horizontal list of actions with the selected one highlighted
+            let action_text = actions
+                .iter()
+                .enumerate()
+                .map(|(i, action)| {
+                    if i == app.selected_action {
+                        format!(">[{}]<", action)
+                    } else {
+                        format!(" {} ", action)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" | ");
+            
+            let mut text = Text::from(vec![
+                Line::from(format!("Actions for PID {}: ←/→ arrows or ↑/↓", pid)),
+                Line::from(Span::styled(
+                    action_text,
+                    Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+                )),
+                Line::from(format!("Selected: {}", selected_action_text)),
+            ]);
+            text
+        } else {
+            // Vertical layout (original behavior)
+            let action_lines: Vec<Line> = actions
+                .iter()
+                .enumerate()
+                .map(|(i, action)| {
+                    if i == app.selected_action {
+                        Line::from(Span::styled(
+                            format!("> {}", action),
+                            Style::default().add_modifier(Modifier::BOLD).fg(Color::Cyan),
+                        ))
+                    } else {
+                        Line::from(format!("  {}", action))
+                    }
+                })
+                .collect();
 
-        let mut text = Text::from(vec![Line::from(format!("Actions for PID {}:", pid))]);
-        text.extend(action_lines);
-        text
+            let mut text = Text::from(vec![Line::from(format!("Actions for PID {}:", pid))]);
+            text.extend(action_lines);
+            text
+        }
     } else {
         Text::from("No process selected")
     };
@@ -300,7 +359,7 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .title("Actions (Esc to close)")
+                .title(if is_cramped { "Actions (Esc: close)" } else { "Actions (Esc to close)" })
                 .style(Style::default().bg(Color::DarkGray))
         );
     f.render_widget(action_panel, area);
