@@ -2,49 +2,19 @@
 
 A real-time per-process network bandwidth monitoring tool for Linux, inspired by `nethogs`. Built with Rust and featuring a terminal UI powered by `ratatui`.
 
-## Features
-
-- Real-time monitoring of network bandwidth usage per process
-- Container awareness for Docker, Podman, LXC, containerd, and systemd-nspawn
-- Interactive setup when run without arguments
-- Configuration persistence between runs
-- TUI interface or JSON output for scripting
-- Sortable columns (PID, process name, sent/received bytes, container name, user name)
-- Human-readable bandwidth formatting (B, KB, MB, GB, TB)
-- Network interface selection
-- Works out of the box – configuration is purely optional
-
-## Screenshots
-
-**Main View**
-
-![Main View](doc/main_view.png)
-
-**Bandwidth – System Stack**
-
-![Stacked Bandwidth](doc/bandwidth_stacked.png)
-
-**Bandwidth – Process Lines**
-
-![Process Bandwidth](doc/bandwidth_process.png)
-
-**System Overview**
-
-![System Overview](doc/system_overview.png)
-
 ## Installation
 
 ### Prerequisites
 
 - Linux system (kernel 2.6+ recommended)
-- Rust tool-chain (stable) – see installation guide below
+- Rust tool-chain (stable)
 - Root/sudo privileges (required for packet capture)
 
-#### Installing Rust
+### Installing Rust
 
-Monitetoring is written in Rust. If you don't already have the tool-chain installed, run **one** of the following snippets:
+If you don't have Rust installed, run **one** of the following snippets:
 
-##### Ubuntu / Debian
+#### Ubuntu / Debian
 
 ```bash
 sudo apt update
@@ -53,7 +23,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 ```
 
-##### Fedora / RHEL / CentOS
+#### Fedora / RHEL / CentOS
 
 ```bash
 sudo dnf install -y curl pkg-config openssl-devel
@@ -63,8 +33,19 @@ source "$HOME/.cargo/env"
 
 After installation re-open your terminal or run `source $HOME/.cargo/env` so that `cargo` is available in your `PATH`.
 
+### Quick Install (Recommended)
 
-### From Source
+Once you have Rust installed, the easiest way to install monitetoring is via cargo:
+
+```bash
+cargo install monitetoring
+```
+
+This will download, compile, and install the latest version from [crates.io](https://crates.io/crates/monitetoring).
+
+### Alternative Installation Methods
+
+#### From Source
 
 ```bash
 git clone https://github.com/superapple8x/monitetoring
@@ -76,7 +57,7 @@ sudo cp target/release/monitetoring /usr/local/bin/
 sudo ln -s /usr/local/bin/monitetoring /usr/local/bin/monto
 ```
 
-### Manual Installation
+#### Manual Installation
 
 After building from source, you can install system-wide:
 
@@ -114,13 +95,7 @@ The project uses these key dependencies:
 Simply run without arguments for guided setup:
 
 ```bash
-# From source (development)
-sudo cargo run
-
-# If installed system-wide
 sudo monitetoring
-# Or use the shorter alias
-sudo monto
 ```
 
 This will:
@@ -132,25 +107,41 @@ This will:
 ### Direct Usage
 
 ```bash
-
-# If installed system-wide
 sudo monitetoring --interface any
 sudo monitetoring --interface eth0 --json
 sudo monitetoring --interface eth0 --containers
 sudo monitetoring --reset
-
-# Or use the shorter 'monto' alias
-sudo monto --interface any
-sudo monto --interface eth0 --json
-sudo monto --interface eth0 --containers
-sudo monto --reset
-
-# From source (development)
-sudo cargo run -- --interface any
-sudo cargo run -- --interface eth0 --json
-sudo cargo run -- --interface eth0 --containers
-sudo cargo run -- --reset
 ```
+
+## Features
+
+- Real-time monitoring of network bandwidth usage per process
+- Container awareness for Docker, Podman, LXC, containerd, and systemd-nspawn
+- Interactive setup when run without arguments
+- Configuration persistence between runs
+- TUI interface or JSON output for scripting
+- Sortable columns (PID, process name, sent/received bytes, container name, user name)
+- Human-readable bandwidth formatting (B, KB, MB, GB, TB)
+- Network interface selection
+- Works out of the box – configuration is purely optional
+
+## Screenshots
+
+**Main View**
+
+![Main View](doc/main_view.png)
+
+**Bandwidth – System Stack**
+
+![Stacked Bandwidth](doc/bandwidth_stacked.png)
+
+**Bandwidth – Process Lines**
+
+![Process Bandwidth](doc/bandwidth_process.png)
+
+**System Overview**
+
+![System Overview](doc/system_overview.png)
 
 ## Command Line Options
 
@@ -243,13 +234,7 @@ Monitetoring has three main interface modes that you can cycle through using the
 For integration with monitoring systems or scripts:
 
 ```bash
-# From source (development)
-sudo cargo run -- --interface eth0 --json --containers
-
-# If installed system-wide
 sudo monitetoring --interface eth0 --json --containers
-# Or use the shorter alias
-sudo monto --interface eth0 --json --containers
 ```
 
 ```json
@@ -301,16 +286,20 @@ The configuration includes:
 
 Reset configuration:
 ```bash
-# From source (development)
-sudo cargo run -- --reset
-
-# If installed system-wide
 sudo monitetoring --reset
-# Or use the shorter alias
-sudo monto --reset
 ```
 
 ## Technical Details
+
+### Dependencies
+
+The project uses these key dependencies:
+- `pcap` - Packet capture
+- `ratatui` - Terminal UI
+- `tokio` - Async runtime
+- `clap` - CLI parsing
+- `procfs` - Process information
+- `serde` - JSON serialization
 
 ### Architecture
 
