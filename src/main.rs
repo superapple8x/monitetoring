@@ -4,6 +4,7 @@ mod process;
 mod capture;
 mod ui;
 mod interactive;
+mod dependencies;
 
 use clap::Parser;
 use pcap::{Device, Capture};
@@ -275,8 +276,33 @@ async fn main() -> Result<(), io::Error> {
 
     // Check packet capture availability early (Windows needs Npcap)
     if let Err(error_message) = process::check_packet_capture_available() {
-        eprintln!("{}", error_message);
-        exit(1);
+        // Use the new dependency system for better user experience
+        let missing_deps = dependencies::DependencyChecker::check_dependencies();
+        if !missing_deps.is_empty() {
+            println!();
+            dependencies::DependencyChecker::display_installation_guides(&missing_deps);
+            match dependencies::DependencyChecker::prompt_installation_action() {
+                Ok(true) => {
+                    // User chose to see guides and exit
+                    println!("👋 Run monitetoring again after installing the required dependencies!");
+                    exit(0);
+                }
+                Ok(false) => {
+                    // User chose to skip and continue anyway
+                    eprintln!("⚠️  Continuing without all dependencies - packet capture may not work properly.");
+                    eprintln!("Original error: {}", error_message);
+                    eprintln!();
+                }
+                Err(e) => {
+                    eprintln!("Error handling user input: {}", e);
+                    exit(1);
+                }
+            }
+        } else {
+            // Fallback to original error if dependency checker didn't find issues
+            eprintln!("{}", error_message);
+            exit(1);
+        }
     }
 
     // Handle reset flag first

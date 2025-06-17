@@ -55,14 +55,16 @@ Once you have Rust installed, the easiest way to install monitetoring is via car
 cargo install monitetoring
 ```
 
-#### Windows
-```cmd
-cargo install monitetoring
-```
-
 This will download, compile, and install the latest version from [crates.io](https://crates.io/crates/monitetoring).
 
-**Note for Windows users**: Make sure to run the application as Administrator for packet capture to work properly.
+
+#### Windows
+
+If you're on Windows, you can download the binary in Releases section and run it
+
+
+**Note**: Make sure to run the application as Administrator or sudo for packet capture to work properly.
+
 
 ### Alternative Installation Methods
 
@@ -139,6 +141,7 @@ sudo monitetoring --reset
 - Real-time monitoring of network bandwidth usage per process
 - Container awareness for Docker, Podman, LXC, containerd, and systemd-nspawn
 - Interactive setup when run without arguments
+- **Smart dependency detection with installation guides** - Automatically detects missing dependencies (like Npcap on Windows) and provides step-by-step installation instructions
 - Configuration persistence between runs
 - TUI interface or JSON output for scripting
 - Sortable columns (PID, process name, sent/received bytes, container name, user name)

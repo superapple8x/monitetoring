@@ -173,7 +173,6 @@ pub struct App {
     pub alert_scroll_offset: usize, // Scroll offset for alert progress bars
     // Performance optimization
     pub last_chart_update: Instant, // Last time chart datasets were updated
-    pub last_cleanup_time: Option<Instant>, // Last time processes were cleaned up
     // Chart persistence fields
     pub process_last_active: HashMap<i32, Instant>, // Track when each process last had non-zero traffic
     pub last_nonzero_system_stats: SystemStats, // Keep last non-zero system stats for display
@@ -224,7 +223,6 @@ impl App {
             alert_scroll_offset: 0,
             // Performance optimization
             last_chart_update: Instant::now(),
-            last_cleanup_time: None,
             // Chart persistence fields
             process_last_active: HashMap::new(),
             last_nonzero_system_stats: SystemStats::new(),
