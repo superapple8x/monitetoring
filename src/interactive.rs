@@ -155,9 +155,15 @@ impl NetworkInterface {
             return Ok(());
         }
 
-        let device = Device::from(self.name.as_str());
-        let cap = Capture::from_device(device)?
-            .timeout(100)  // Short timeout for quick sampling
+        let device = match crate::dependencies::DependencyChecker::device_from_name_with_dependency_check(&self.name) {
+            Ok(device) => device,
+            Err(_) => return Ok(()), // Skip interfaces that can't be opened due to dependency issues
+        };
+        let cap = match crate::dependencies::DependencyChecker::capture_from_device_with_dependency_check(device) {
+            Ok(cap) => cap,
+            Err(_) => return Ok(()), // Skip interfaces that can't be opened due to dependency issues
+        };
+        let cap = cap.timeout(100)  // Short timeout for quick sampling
             .open();
         
         let mut cap = match cap {
@@ -314,12 +320,10 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
     loop {
         println!("🔌 Available Network Interfaces:");
         
-        let devices = match Device::list() {
+        let devices = match crate::dependencies::DependencyChecker::list_devices_with_dependency_check() {
             Ok(d) => d,
             Err(e) => {
-                eprintln!("❌ Error listing network devices: {}", e);
-                eprintln!("   This might be due to insufficient permissions.");
-                eprintln!("   Try running with sudo or check your network permissions.");
+                eprintln!("{}", e);
                 return Ok(None);
             }
         };

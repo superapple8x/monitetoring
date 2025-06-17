@@ -1,3 +1,4 @@
 /target
 Cargo.lock
 src/process.rs.backup
+prepare_windows_release.bat

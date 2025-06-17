@@ -1,5 +1,7 @@
 #[cfg(target_os = "windows")]
 use std::process::Command;
+#[cfg(target_os = "windows")]
+use std::panic;
 
 #[derive(Debug, Clone)]
 pub struct DependencyInfo {
@@ -41,12 +43,148 @@ impl DependencyChecker {
         missing_deps
     }
     
+    /// Wrapper for Device::list() that provides dependency-aware error handling
+    pub fn list_devices_with_dependency_check() -> Result<Vec<pcap::Device>, String> {
+        match pcap::Device::list() {
+            Ok(devices) => Ok(devices),
+            Err(e) => {
+                // Check if this error is due to missing dependencies
+                let missing_deps = Self::check_dependencies();
+                if !missing_deps.is_empty() {
+                    // We have missing dependencies - show the installation guide
+                    println!();
+                    Self::display_installation_guides(&missing_deps);
+                    
+                    match Self::prompt_installation_action() {
+                        Ok(true) => {
+                            // User chose to see guides and exit
+                            println!("👋 Run monitetoring again after installing the required dependencies!");
+                            std::process::exit(0);
+                        }
+                        Ok(false) => {
+                            // User chose to skip and continue anyway
+                            println!("⚠️  Continuing without all dependencies - some features may not work properly.");
+                            println!("Original error: {}", e);
+                            println!();
+                            return Err(format!("Packet capture unavailable: {}", e));
+                        }
+                        Err(io_err) => {
+                            eprintln!("Error handling user input: {}", io_err);
+                            std::process::exit(1);
+                        }
+                    }
+                } else {
+                    // No missing dependencies detected, this might be a permissions or other issue
+                    #[cfg(target_os = "linux")]
+                    return Err(format!(
+                        "❌ Error listing network devices: {}\n\n\
+                        💡 This might be due to insufficient permissions.\n\
+                        Try running with sudo or check your network permissions.\n\n\
+                        🔧 You can also try: sudo setcap cap_net_raw,cap_net_admin=eip ./monitetoring", e
+                    ));
+                    
+                    #[cfg(target_os = "windows")]
+                    return Err(format!(
+                        "❌ Error listing network devices: {}\n\n\
+                        💡 Make sure you're running as Administrator and have proper network permissions.", e
+                    ));
+                }
+            }
+        }
+    }
 
+    /// Wrapper for Device::from() that provides dependency-aware error handling
+    pub fn device_from_name_with_dependency_check(name: &str) -> Result<pcap::Device, String> {
+        #[cfg(target_os = "windows")]
+        {
+            // On Windows, check dependencies before trying to create the device
+            let missing_deps = Self::check_dependencies();
+            if !missing_deps.is_empty() {
+                println!();
+                Self::display_installation_guides(&missing_deps);
+                
+                match Self::prompt_installation_action() {
+                    Ok(true) => {
+                        println!("👋 Run monitetoring again after installing the required dependencies!");
+                        std::process::exit(0);
+                    }
+                    Ok(false) => {
+                        println!("⚠️  Continuing without all dependencies - packet capture may not work properly.");
+                        println!();
+                    }
+                    Err(io_err) => {
+                        eprintln!("Error handling user input: {}", io_err);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        
+        // Try to create the device
+        Ok(pcap::Device::from(name))
+    }
+
+    /// Wrapper for Capture::from_device() that provides dependency-aware error handling  
+    pub fn capture_from_device_with_dependency_check(device: pcap::Device) -> Result<pcap::Capture<pcap::Inactive>, String> {
+        match pcap::Capture::from_device(device) {
+            Ok(capture) => Ok(capture),
+            Err(e) => {
+                #[cfg(target_os = "windows")]
+                {
+                    // Check if this is a dependency issue
+                    let missing_deps = Self::check_dependencies();
+                    if !missing_deps.is_empty() {
+                        println!();
+                        Self::display_installation_guides(&missing_deps);
+                        
+                        match Self::prompt_installation_action() {
+                            Ok(true) => {
+                                println!("👋 Run monitetoring again after installing the required dependencies!");
+                                std::process::exit(0);
+                            }
+                            Ok(false) => {
+                                println!("⚠️  Continuing without all dependencies - packet capture may not work properly.");
+                                println!("Original error: {}", e);
+                                println!();
+                                return Err(format!("Packet capture unavailable: {}", e));
+                            }
+                            Err(io_err) => {
+                                eprintln!("Error handling user input: {}", io_err);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                }
+                
+                // Return formatted error for non-dependency issues
+                Err(format!("❌ Error creating capture handle: {}", e))
+            }
+        }
+    }
     
     /// Windows: Check if Npcap or WinPcap is installed
     #[cfg(target_os = "windows")]
     fn check_npcap_windows() -> bool {
-        // Check if npcap service is installed
+        // First approach: Check for common DLL files directly in system directories
+        let system_paths = [
+            "C:\\Windows\\System32\\wpcap.dll",
+            "C:\\Windows\\System32\\packet.dll",
+            "C:\\Windows\\SysWOW64\\wpcap.dll", 
+            "C:\\Windows\\SysWOW64\\packet.dll",
+        ];
+        
+        let mut dll_found = false;
+        for path in &system_paths {
+            if std::path::Path::new(path).exists() {
+                dll_found = true;
+                break;
+            }
+        }
+        
+        // Second approach: Check for service existence
+        let mut service_found = false;
+        
+        // Check for Npcap service
         let npcap_check = Command::new("sc")
             .args(["query", "npcap"])
             .output();
@@ -54,23 +192,32 @@ impl DependencyChecker {
         if let Ok(result) = npcap_check {
             let output_str = String::from_utf8_lossy(&result.stdout);
             if output_str.contains("RUNNING") || output_str.contains("STOPPED") {
-                return true; // Npcap service exists
+                service_found = true;
             }
         }
         
-        // Fallback: Check for WinPcap
-        let winpcap_check = Command::new("sc")
-            .args(["query", "npf"])
-            .output();
-            
-        if let Ok(result) = winpcap_check {
-            let output_str = String::from_utf8_lossy(&result.stdout);
-            if output_str.contains("RUNNING") || output_str.contains("STOPPED") {
-                return true; // WinPcap service exists
+        // Check for WinPcap service if Npcap not found
+        if !service_found {
+            let winpcap_check = Command::new("sc")
+                .args(["query", "npf"])
+                .output();
+                
+            if let Ok(result) = winpcap_check {
+                let output_str = String::from_utf8_lossy(&result.stdout);
+                if output_str.contains("RUNNING") || output_str.contains("STOPPED") {
+                    service_found = true;
+                }
             }
         }
         
-        false
+        // If neither DLL nor service found, definitely not installed
+        if !dll_found && !service_found {
+            return false;
+        }
+        
+        // If we found evidence of installation, assume it's working
+        // We avoid calling pcap functions here to prevent crashes
+        dll_found || service_found
     }
     
     /// Linux: Check if libpcap is available (usually always available on Linux)
@@ -99,14 +246,21 @@ impl DependencyChecker {
                 "3. Run the installer as Administrator",
                 "4. During installation, make sure to check 'Install Npcap in WinPcap API-compatible Mode'",
                 "5. Complete the installation and reboot if prompted",
-                "6. Run monitetoring as Administrator after installation"
+                "6. Run monitetoring as Administrator after installation",
+                "",
+                "If Npcap is already installed but not working:",
+                "7. Try restarting the Npcap service: net stop npcap && net start npcap",
+                "8. Reinstall Npcap with WinPcap compatibility mode enabled",
+                "9. Check Windows Defender or antivirus isn't blocking packet capture"
             ],
             download_url: Some("https://npcap.com/"),
             additional_notes: vec![
                 "• Npcap is free and safe - it's the standard packet capture library used by Wireshark",
                 "• You need Administrator privileges to capture network packets on Windows",
                 "• If you have WinPcap installed, Npcap can coexist with it",
-                "• Some antivirus software may flag packet capture tools - this is normal"
+                "• Some antivirus software may flag packet capture tools - this is normal",
+                "• If wpcap.dll errors occur, enable WinPcap API-compatible mode during installation",
+                "• Try running 'sc query npcap' in Command Prompt to check service status"
             ],
         }
     }
@@ -242,4 +396,10 @@ pub fn handle_dependencies_in_setup() -> std::io::Result<bool> {
         println!();
         return Ok(true); // Continue with setup
     }
+}
+
+/// Quick check to verify if packet capture dependencies are available
+/// Returns true if dependencies are satisfied, false otherwise
+pub fn verify_packet_capture_dependencies() -> bool {
+    DependencyChecker::check_dependencies().is_empty()
 } 

@@ -57,10 +57,10 @@ fn show_interface_help() {
     eprintln!("   sudo monitetoring --reset                         # Reset saved configuration");
     eprintln!();
     eprintln!("🔌 Available network interfaces:");
-    let devices = match Device::list() {
+    let devices = match dependencies::DependencyChecker::list_devices_with_dependency_check() {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("Error listing devices: {}", e);
+            eprintln!("{}", e);
             exit(1);
         }
     };
@@ -239,6 +239,31 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
 
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
+    // CRITICAL: Check dependencies FIRST, before any pcap functions are called
+    // This prevents crashes when wpcap.dll/npcap is missing on Windows
+    #[cfg(target_os = "windows")]
+    {
+        let missing_deps = dependencies::DependencyChecker::check_dependencies();
+        if !missing_deps.is_empty() {
+            println!();
+            dependencies::DependencyChecker::display_installation_guides(&missing_deps);
+            match dependencies::DependencyChecker::prompt_installation_action() {
+                Ok(true) => {
+                    println!("👋 Run monitetoring again after installing the required dependencies!");
+                    exit(0);
+                }
+                Ok(false) => {
+                    println!("⚠️  Continuing without all dependencies - some features may not work properly.");
+                    println!();
+                }
+                Err(e) => {
+                    eprintln!("Error handling user input: {}", e);
+                    exit(1);
+                }
+            }
+        }
+    }
+
     let cli = Cli::parse();
 
     // Collect startup warnings to display in the UI once it launches
@@ -351,12 +376,31 @@ async fn main() -> Result<(), io::Error> {
     // Spawn packet capture thread
     let iface_clone = iface.clone();
     thread::spawn(move || {
-        let main_device = Device::from(iface_clone.as_str());
+        let main_device = match dependencies::DependencyChecker::device_from_name_with_dependency_check(&iface_clone) {
+            Ok(device) => device,
+            Err(e) => {
+                eprintln!("{}", e);
+                exit(1);
+            }
+        };
         
-        let cap = match Capture::from_device(main_device) {
+        let cap = match dependencies::DependencyChecker::capture_from_device_with_dependency_check(main_device) {
             Ok(cap) => cap,
             Err(e) => {
-                eprintln!("Error creating capture handle: {}", e);
+                eprintln!("{}", e);
+                eprintln!();
+                eprintln!("💡 This might be due to:");
+                #[cfg(target_os = "windows")]
+                eprintln!("   • Missing or improperly installed Npcap/WinPcap");
+                #[cfg(target_os = "linux")]
+                eprintln!("   • Insufficient permissions (try running with sudo)");
+                eprintln!("   • Network interface not available or already in use");
+                eprintln!("   • Firewall or security software blocking packet capture");
+                eprintln!();
+                #[cfg(target_os = "windows")]
+                eprintln!("🔧 Try installing Npcap from: https://npcap.com/");
+                #[cfg(target_os = "linux")]
+                eprintln!("🔧 Try: sudo setcap cap_net_raw,cap_net_admin=eip ./monitetoring");
                 exit(1);
             }
         };
@@ -370,7 +414,23 @@ async fn main() -> Result<(), io::Error> {
         let mut cap = match cap.timeout(10).open() {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("Error opening capture: {}", e);
+                eprintln!("❌ Error opening packet capture: {}", e);
+                eprintln!();
+                eprintln!("💡 Common solutions:");
+                #[cfg(target_os = "windows")]
+                {
+                    eprintln!("   • Make sure you're running as Administrator");
+                    eprintln!("   • Install Npcap from: https://npcap.com/");
+                    eprintln!("   • Ensure Npcap service is running");
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    eprintln!("   • Run with sudo: sudo ./monitetoring --iface {}", iface_clone);
+                    eprintln!("   • Set capabilities: sudo setcap cap_net_raw,cap_net_admin=eip ./monitetoring");
+                    eprintln!("   • Check if interface exists: ip link show");
+                }
+                eprintln!("   • Try a different network interface");
+                eprintln!("   • Check if another packet capture tool is running");
                 exit(1);
             }
         };
@@ -482,7 +542,7 @@ async fn main() -> Result<(), io::Error> {
             if !json_mode && last_send.elapsed() > Duration::from_millis(100) {
                 match tx.try_send(bandwidth_map.clone()) {
                     Ok(_) => {
-                        last_send = Instant::now();
+                last_send = Instant::now();
                     }
                     Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
                         // Channel full – drop the update, UI will catch up and we send a fresh snapshot later
@@ -532,7 +592,7 @@ async fn main() -> Result<(), io::Error> {
         let tick_rate = Duration::from_millis(100);
         let mut last_tick = Instant::now();
         let mut last_cleanup = Instant::now();
-
+        
         loop {
             // --- Draw UI ---
             ui::render_ui(&app, &mut terminal)?;
@@ -637,8 +697,8 @@ async fn main() -> Result<(), io::Error> {
 
                 // Check for triggered alerts
                 let mut triggered_alerts = Vec::new();
-                for (pid, alert) in &app.alerts {
-                    if let Some(stats) = app.stats.get(pid) {
+            for (pid, alert) in &app.alerts {
+                if let Some(stats) = app.stats.get(pid) {
                         let total_usage = stats.sent + stats.received;
                         if total_usage > alert.threshold_bytes {
                             // Check cooldown
@@ -646,9 +706,9 @@ async fn main() -> Result<(), io::Error> {
                                 last_triggered.elapsed() > Duration::from_secs(60) // 1 minute cooldown
                             } else {
                                 true
-                            };
-
-                            if should_trigger {
+                        };
+                        
+                        if should_trigger {
                                 triggered_alerts.push((*pid, alert.clone()));
                                 app.alert_cooldowns.insert(*pid, Instant::now());
                             }

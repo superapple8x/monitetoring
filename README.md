@@ -4,112 +4,154 @@ A real-time per-process network bandwidth monitoring tool for Linux and Windows,
 
 ## Installation
 
-### Prerequisites
+### Recommended Installation
 
-#### Linux
-- Linux system (kernel 2.6+ recommended)
-- Rust tool-chain (stable)
-- Root/sudo privileges (required for packet capture)
+#### Windows
 
-#### Windows  
-- Windows 10/11
-- Rust tool-chain (stable)
-- [Npcap](https://npcap.com/) or WinPcap installed
-- Administrator privileges (required for packet capture)
+The easiest way to get started on Windows is to use the pre-compiled binary release.
 
-### Installing Rust
+1.  **Download the latest Windows release** from the [GitHub Releases](https://github.com/superapple8x/monitetoring/releases) page.
+2.  **Extract the ZIP file** to a permanent folder (e.g., `C:\Program Files\monitetoring`).
+3.  **Run the automated setup script**: Right-click on `setup_windows.bat` and select "Run as Administrator".
 
-If you don't have Rust installed, run **one** of the following snippets:
+The setup script handles everything for you:
+- ✅ Verifies Administrator privileges.
+- ✅ Checks for the required **Npcap** dependency and guides you through the installation if it's missing.
+- ✅ Prepares the application for use.
 
-#### Ubuntu / Debian
+After setup, you can run `monitetoring.exe` as Administrator.
+
+#### Linux (via Cargo)
+
+For Linux, the recommended method is to install via `cargo`. This requires the Rust toolchain, which includes `cargo`.
+
+**1. Install Rust & Cargo**
+
+Choose the command for your distribution:
+
+<details>
+<summary><b>Ubuntu / Debian</b></summary>
 
 ```bash
+# Install dependencies and Rust/Cargo
 sudo apt update
 sudo apt install -y curl build-essential pkg-config libssl-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 ```
+</details>
 
-#### Fedora / RHEL / CentOS
+<details>
+<summary><b>Fedora / RHEL / CentOS</b></summary>
 
 ```bash
+# Install dependencies and Rust/Cargo
 sudo dnf install -y curl pkg-config openssl-devel
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 ```
+</details>
 
-#### Windows
+After installation, you may need to restart your terminal or run `source "$HOME/.cargo/env"` for the `cargo` command to be available.
 
-1. Download and install Rust from [rustup.rs](https://rustup.rs/)
-2. Install [Npcap](https://npcap.com/) (recommended) or WinPcap for packet capture support
-3. Open PowerShell or Command Prompt as Administrator
-
-After installation re-open your terminal or run `source $HOME/.cargo/env` (Linux/macOS) so that `cargo` is available in your `PATH`.
-
-### Quick Install (Recommended)
-
-Once you have Rust installed, the easiest way to install monitetoring is via cargo:
-
-#### Linux/macOS
+**2. Install Monitetoring**
 ```bash
+# This single command downloads, compiles, and installs the application
 cargo install monitetoring
 ```
+Once installed, run the application with `sudo monitetoring`.
 
-This will download, compile, and install the latest version from [crates.io](https://crates.io/crates/monitetoring).
+---
 
+### Building from Source (For Developers)
 
-#### Windows
+If you want to contribute, modify, or build the project manually, follow these steps. This is the only path that requires you to install the Rust compiler.
 
-If you're on Windows, you can download the binary in Releases section and run it
-
-
-**Note**: Make sure to run the application as Administrator or sudo for packet capture to work properly.
-
-
-### Alternative Installation Methods
-
-#### From Source
+#### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/superapple8x/monitetoring
 cd monitetoring
-cargo build --release
-sudo cp target/release/monitetoring /usr/local/bin/
-
-# Optional: Create the shorter 'monto' alias
-sudo ln -s /usr/local/bin/monitetoring /usr/local/bin/monto
 ```
 
-#### Manual Installation
+#### 2. Install Rust Toolchain (if you don't have it)
 
-After building from source, you can install system-wide:
+If you don't have Rust, install it using `rustup`.
+
+**On Linux:**
+
+Choose the command for your distribution:
+
+<details>
+<summary><b>Ubuntu / Debian</b></summary>
 
 ```bash
-# Build the project
+# Install dependencies and Rust/Cargo
+sudo apt update
+sudo apt install -y curl build-essential pkg-config libssl-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+```
+</details>
+
+<details>
+<summary><b>Fedora / RHEL / CentOS</b></summary>
+
+```bash
+# Install dependencies and Rust/Cargo
+sudo dnf install -y curl pkg-config openssl-devel
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+source "$HOME/.cargo/env"
+```
+</details>
+
+After installation, you may need to restart your terminal or run `source "$HOME/.cargo/env"` for the `cargo` command to be available.
+
+**On Windows:**
+- Download and run `rustup-init.exe` from [rustup.rs](https://rustup.rs/).
+- Ensure you also install the C++ build tools when prompted by the installer.
+
+#### 3. Build the Application
+
+**On Linux:**
+```bash
 cargo build --release
 
-# Install to system (requires sudo)
-sudo cp target/release/monitetoring /usr/local/bin/
-# Optional: Create the shorter 'monto' alias
-sudo ln -s /usr/local/bin/monitetoring /usr/local/bin/monto
-
-# Or install to user directory (no sudo needed)
-mkdir -p ~/.local/bin
-cp target/release/monitetoring ~/.local/bin/
-# Optional: Create the shorter 'monto' alias
-ln -s ~/.local/bin/monitetoring ~/.local/bin/monto
-# Make sure ~/.local/bin is in your PATH
+# To run it:
+sudo ./target/release/monitetoring
 ```
 
-### Dependencies
+**On Windows:**
+Building on Windows has an additional dependency: the **Npcap SDK**.
 
-The project uses these key dependencies:
-- `pcap` - Packet capture
-- `ratatui` - Terminal UI
-- `tokio` - Async runtime
-- `clap` - CLI parsing
-- `procfs` - Process information
-- `serde` - JSON serialization
+- **A. Install Npcap Runtime**: Download and install the latest "Npcap installer" from the [official website](https://npcap.com/#download).
+  - ⚠️ **Critical**: During installation, check the box for "Install Npcap in WinPcap API-compatible Mode".
+- **B. Install Npcap SDK**: Download the "Npcap SDK" from the same page and unzip it.
+- **C. Build the code**:
+  ```cmd
+  # You can either set an environment variable to the SDK location...
+  set NPCAP_SDK_PATH=C:\path\to\npcap-sdk
+  
+  # ...or place the SDK's /Lib/x64 folder contents in the right place.
+  # See build.rs for details.
+
+  cargo build --release
+  ```
+
+After building, run `./target/release/monitetoring.exe` as Administrator.
+
+#### Windows Troubleshooting
+
+**Build fails with "wpcap.lib not found"**:
+- ✅ You have the Npcap *Runtime* but are missing the **Npcap SDK**. They are separate downloads.
+- ✅ Ensure the `NPCAP_SDK_PATH` environment variable is set correctly or that you've placed the library files where the build script can find them.
+
+**Application crashes or "No interfaces found"**:
+- ✅ Run the executable as Administrator.
+- ✅ Verify Npcap was installed with "WinPcap API-compatible Mode" enabled.
+- ✅ Check that the `npcap` service is running: `sc query npcap`.
+
+---
 
 ## Quick Start
 
@@ -367,3 +409,5 @@ If you encounter any issues:
 4. Check the logs for any error messages
 
 For bug reports and feature requests, please use the GitHub issue tracker. 
+
+
