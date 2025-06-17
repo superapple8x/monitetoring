@@ -268,7 +268,7 @@ async fn main() -> Result<(), io::Error> {
             }
             _ => {
                 // Not admin – store warning to propagate to UI later
-                startup_warning = Some("⚠️ Not running as Administrator. Some features may not work (Esc to dismiss)".to_string());
+                startup_warning = Some("⚠️ Not running as Administrator. Some features may not work".to_string());
             }
         }
     }
@@ -298,7 +298,7 @@ async fn main() -> Result<(), io::Error> {
     }
 
     // Check if no arguments were provided - run interactive mode
-    let (iface, json_mode, mut containers_mode, show_total_columns) = if cli.iface.is_none() && !cli.json && !cli.containers {
+    let (iface, json_mode, containers_mode, show_total_columns) = if cli.iface.is_none() && !cli.json && !cli.containers {
         // No arguments provided, run interactive mode
         match run_interactive_mode()? {
             Some(config) => (config.interface, config.json_mode, config.containers_mode, config.show_total_columns),
@@ -598,6 +598,14 @@ async fn main() -> Result<(), io::Error> {
                     if time.elapsed() > Duration::from_secs(5) {
                         app.kill_notification = None;
                         app.kill_notification_time = None;
+                    }
+                }
+
+                // Cleanup settings notifications that have been displayed for more than 5 seconds
+                if let Some(time) = app.settings_notification_time {
+                    if time.elapsed() > Duration::from_secs(5) {
+                        app.settings_notification = None;
+                        app.settings_notification_time = None;
                     }
                 }
 

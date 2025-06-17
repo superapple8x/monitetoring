@@ -1,11 +1,8 @@
 use std::io::{self, Write};
 use pcap::Device;
 use crate::config::{SavedConfig, load_config, save_config};
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use std::thread;
 use pcap::Capture;
-use crate::capture::connection_from_packet;
 
 pub struct InteractiveConfig {
     pub interface: String,
@@ -155,9 +152,89 @@ impl NetworkInterface {
             return Ok(());
         }
 
+        // On Linux, use system statistics exclusively - no packet capture during setup
+        #[cfg(target_os = "linux")]
+        {
+            self.traffic_bytes = self.estimate_interface_activity_linux();
+            return Ok(());
+        }
+
+        // On non-Linux systems, fall back to packet capture
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.measure_traffic_pcap()
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn estimate_interface_activity_linux(&self) -> u64 {
+        // Use multiple methods to estimate interface activity without packet capture
+        let mut activity_score = 0u64;
+
+        // Method 1: Check /proc/net/dev for historical statistics
+        if let Ok(stats) = std::fs::read_to_string("/proc/net/dev") {
+            for line in stats.lines() {
+                if line.contains(&self.name) {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 10 {
+                        let rx_bytes: u64 = parts[1].parse().unwrap_or(0);
+                        let tx_bytes: u64 = parts[9].parse().unwrap_or(0);
+                        let rx_packets: u64 = parts[2].parse().unwrap_or(0);
+                        let tx_packets: u64 = parts[10].parse().unwrap_or(0);
+                        
+                        // Calculate activity score based on historical data
+                        let total_bytes = rx_bytes + tx_bytes;
+                        let total_packets = rx_packets + tx_packets;
+                        
+                        // Higher score for interfaces with more activity
+                        if total_bytes > 0 {
+                            activity_score += (total_bytes / 1000000).min(1000); // Cap at 1000
+                        }
+                        if total_packets > 0 {
+                            activity_score += (total_packets / 1000).min(100); // Cap at 100
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Method 2: Check interface flags and characteristics
+        if self.name.starts_with("eth") || self.name.starts_with("enp") {
+            activity_score += 50; // Ethernet interfaces are usually primary
+        } else if self.name.starts_with("wl") || self.name.starts_with("wlan") {
+            activity_score += 40; // WiFi interfaces are common
+        } else if self.name == "lo" {
+            activity_score += 5; // Loopback has low priority
+        }
+
+        // Method 3: Check if interface has a default route (primary interface)
+        if let Ok(routes) = std::fs::read_to_string("/proc/net/route") {
+            for line in routes.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 8 && parts[0] == self.name {
+                    // Check if this is a default route (destination 00000000)
+                    if parts[1] == "00000000" {
+                        activity_score += 100; // High priority for default route
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Method 4: Check if interface is in network namespace
+        let sys_path = format!("/sys/class/net/{}", self.name);
+        if std::path::Path::new(&sys_path).exists() {
+            activity_score += 10; // Interface exists in sysfs
+        }
+
+        activity_score
+    }
+
+    fn measure_traffic_pcap(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let device = Device::from(self.name.as_str());
         let cap = Capture::from_device(device)?
-            .timeout(100)  // Short timeout for quick sampling
+            .timeout(500)  // Reduce timeout to 500ms for faster detection
             .open();
         
         let mut cap = match cap {
@@ -167,16 +244,25 @@ impl NetworkInterface {
 
         let start_time = Instant::now();
         let mut total_bytes = 0u64;
+        let mut packet_count = 0u64;
 
-        // Measure for exactly 5 seconds
-        while start_time.elapsed() < Duration::from_secs(5) {
+        // Much shorter measurement period - just 1 second max
+        while start_time.elapsed() < Duration::from_secs(1) {
             match cap.next_packet() {
                 Ok(packet) => {
                     total_bytes += packet.data.len() as u64;
+                    packet_count += 1;
+                    
+                    // Early exit if we detect significant traffic
+                    if packet_count >= 10 || total_bytes > 10000 {
+                        break;
+                    }
                 }
                 Err(_) => {
-                    // Timeout or error, continue sampling
-                    thread::sleep(Duration::from_millis(10));
+                    // Quick timeout - if no packets in 500ms, probably inactive
+                    if start_time.elapsed() > Duration::from_millis(500) && packet_count == 0 {
+                        break;
+                    }
                 }
             }
         }
@@ -335,42 +421,85 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
             .map(NetworkInterface::from_device)
             .collect();
 
-        // Measure traffic on all interfaces for 5 seconds
-        println!("📊 Measuring traffic on interfaces for 5 seconds...");
-        println!("   (This helps identify the busiest interface)");
+        // Analyze network interfaces - instant on Linux, quick on others
+        println!("📊 Analyzing network interfaces...");
+        #[cfg(target_os = "linux")]
+        println!("   (Using system statistics - instant analysis)");
+        #[cfg(not(target_os = "linux"))]
+        println!("   (Using packet capture for up to 1 second each)");
         println!();
         
-        // Use threading to measure multiple interfaces concurrently
-        let mut handles = vec![];
-        for interface in &mut interfaces {
-            if interface.is_up {
-                let interface_name = interface.name.clone();
-                let handle = thread::spawn(move || {
-                    let mut temp_interface = NetworkInterface {
-                        name: interface_name.clone(),
-                        description: None,
-                        is_up: true,
-                        traffic_bytes: 0,
-                    };
-                    let _ = temp_interface.measure_traffic();
-                    (interface_name, temp_interface.traffic_bytes)
-                });
-                handles.push(handle);
+        // On Linux, do instant analysis without threading complexity
+        #[cfg(target_os = "linux")]
+        {
+            for interface in &mut interfaces {
+                if interface.is_up {
+                    let _ = interface.measure_traffic();
+                }
             }
+            println!("   ✅ Analysis complete!");
+            println!();
         }
-        
-        // Collect results
-        let mut traffic_results: HashMap<String, u64> = HashMap::new();
-        for handle in handles {
-            if let Ok((name, bytes)) = handle.join() {
-                traffic_results.insert(name, bytes);
+
+        // On non-Linux systems, use the threaded approach with packet capture
+        #[cfg(not(target_os = "linux"))]
+        {
+            let total_interfaces = interfaces.iter().filter(|i| i.is_up).count();
+            let mut completed = 0;
+            let max_concurrent = total_interfaces;
+            
+            let mut traffic_results: HashMap<String, u64> = HashMap::new();
+            let up_interfaces: Vec<_> = interfaces.iter().filter(|i| i.is_up).collect();
+            
+            // Process interfaces in batches to limit concurrency
+            for chunk in up_interfaces.chunks(max_concurrent) {
+                let mut handles = vec![];
+                
+                for interface in chunk {
+                    let interface_name = interface.name.clone();
+                    let handle = thread::spawn(move || {
+                        let mut temp_interface = NetworkInterface {
+                            name: interface_name.clone(),
+                            description: None,
+                            is_up: true,
+                            traffic_bytes: 0,
+                        };
+                        let start = Instant::now();
+                        let _ = temp_interface.measure_traffic();
+                        let duration = start.elapsed();
+                        (interface_name, temp_interface.traffic_bytes, duration)
+                    });
+                    handles.push(handle);
+                }
+                
+                // Collect results from this batch
+                for handle in handles {
+                    if let Ok((name, bytes, duration)) = handle.join() {
+                        traffic_results.insert(name.clone(), bytes);
+                        completed += 1;
+                        
+                        // Show progress
+                        let status = if bytes > 0 { 
+                            format!("📈 {} bytes in {:.1}s", format_bytes(bytes), duration.as_secs_f64())
+                        } else { 
+                            format!("💤 no traffic ({:.1}s)", duration.as_secs_f64())
+                        };
+                        println!("   [{}/{}] {} - {}", completed, total_interfaces, name, status);
+                        io::stdout().flush().unwrap_or(());
+                    }
+                }
             }
-        }
-        
-        // Update interfaces with measured traffic
-        for interface in &mut interfaces {
-            if let Some(&traffic) = traffic_results.get(&interface.name) {
-                interface.traffic_bytes = traffic;
+            
+            if completed > 0 {
+                println!("   ✅ Measurement complete!");
+                println!();
+            }
+            
+            // Update interfaces with measured traffic on non-Linux systems
+            for interface in &mut interfaces {
+                if let Some(&traffic) = traffic_results.get(&interface.name) {
+                    interface.traffic_bytes = traffic;
+                }
             }
         }
         
@@ -391,7 +520,10 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
         
         println!("   0. Quit");
         println!();
-        println!("🟢 = Interface is up   🔴 = Interface is down   [traffic] = Bytes observed in 5s");
+        #[cfg(target_os = "linux")]
+        println!("🟢 = Interface is up   🔴 = Interface is down   [traffic] = Activity score");
+        #[cfg(not(target_os = "linux"))]
+        println!("🟢 = Interface is up   🔴 = Interface is down   [traffic] = Bytes observed");
         println!();
         
         match InputHandler::numeric_choice_prompt("📡 Select interface (number)", 0, interfaces.len())? {

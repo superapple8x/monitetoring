@@ -473,9 +473,9 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is
     };
 
     let title = if let Some(pid) = app.selected_process {
-        format!("Actions for PID {} (Esc to close)", pid)
+        format!("Actions for PID {}", pid)
     } else {
-        "Actions (Esc to close)".to_string()
+        "Actions".to_string()
     };
     
     let action_panel = Paragraph::new(action_panel_text)
@@ -518,7 +518,7 @@ fn render_totals_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         };
         let kill_notification = Paragraph::new(kill_msg.as_str())
             .style(kill_style)
-            .block(Block::default().borders(Borders::ALL).title("Process Action (Esc to dismiss)"));
+            .block(Block::default().borders(Borders::ALL).title("Process Action"));
         f.render_widget(kill_notification, chunks[1]);
     } else {
         // No kill notification, render totals normally
@@ -556,7 +556,7 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
             let body = parts.next().unwrap_or("");
             let exec_paragraph = Paragraph::new(format!("{} ({})", body.trim(), time_str))
                 .style(Style::default().fg(Color::Cyan))
-                .block(Block::default().borders(Borders::ALL).title(format!("{} (Esc to dismiss)", header)));
+                .block(Block::default().borders(Borders::ALL).title(header));
             f.render_widget(exec_paragraph, chunks[0]);
 
             // Alert message box (no dismiss guide since top box has it)
@@ -575,32 +575,22 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
         let body = parts.next().unwrap_or("");
         let exec_paragraph = Paragraph::new(format!("{} ({})", body.trim(), time_str))
             .style(Style::default().fg(Color::Cyan))
-            .block(Block::default().borders(Borders::ALL).title(format!("{} (Esc to dismiss)", header)));
+            .block(Block::default().borders(Borders::ALL).title(header));
         f.render_widget(exec_paragraph, area);
     }
     // If no messages to show, leave the space empty (removed the "No Action Executed" box)
 }
 
-fn format_alert_message(msg: &str, show_dismiss_guide: bool) -> Paragraph {
+fn format_alert_message(msg: &str, _show_dismiss_guide: bool) -> Paragraph {
     if let Some(pos) = msg.find(':') {
         let header = &msg[..=pos];
         let body = msg[pos + 1..].trim();
-        let title = if show_dismiss_guide {
-            format!("{} (Esc to dismiss)", header)
-        } else {
-            header.to_string()
-        };
         Paragraph::new(body)
             .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().borders(Borders::ALL).title(title))
+            .block(Block::default().borders(Borders::ALL).title(header))
     } else {
-        let title = if show_dismiss_guide {
-            "Alert (Esc to dismiss)".to_string()
-        } else {
-            "Alert".to_string()
-        };
         Paragraph::new(msg)
             .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().borders(Borders::ALL).title(title))
+            .block(Block::default().borders(Borders::ALL).title("Alert"))
     }
 } 

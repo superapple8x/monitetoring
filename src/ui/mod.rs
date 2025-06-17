@@ -26,6 +26,7 @@ pub fn render_ui(app: &App, terminal: &mut Terminal<CrosstermBackend<io::Stdout>
             }
             AppMode::EditingAlert => renderers::alert::render(f, app),
             AppMode::SystemOverview => renderers::overview::render(f, app),
+            AppMode::Settings => renderers::settings::render(f, app),
         }
     })?;
     Ok(())

@@ -8,11 +8,12 @@ use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 
 /// Handle keyboard input events for all application modes
-pub fn handle_key_event(app: &mut App, key: KeyCode) -> bool {
+pub fn handle_key_event(app: &mut App, key: crossterm::event::KeyCode) -> bool {
     match app.mode {
         AppMode::EditingAlert => handle_alert_editing_keys(app, key),
         AppMode::Normal => handle_normal_mode_keys(app, key),
         AppMode::SystemOverview => handle_overview_mode_keys(app, key),
+        AppMode::Settings => handle_settings_mode_keys(app, key),
     }
 }
 
@@ -169,7 +170,7 @@ fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
                                 .map(|info| info.name.clone())
                                 .unwrap_or_else(|| format!("PID {}", pid));
                             
-                            app.kill_notification = Some(format!("✅ Successfully killed {} (PID {}) (Esc to dismiss)", process_name, pid));
+                            app.kill_notification = Some(format!("✅ Successfully killed {} (PID {})", process_name, pid));
                             app.kill_notification_time = Some(std::time::Instant::now());
                             
                             // Remove process immediately from stats and alerts
@@ -179,7 +180,7 @@ fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
                             app.killed_processes.insert(pid);
                             app.selected_process = None;
                         } else {
-                            app.kill_notification = Some(format!("❌ Failed to kill process (PID {}) (Esc to dismiss)", pid));
+                            app.kill_notification = Some(format!("❌ Failed to kill process (PID {})", pid));
                             app.kill_notification_time = Some(std::time::Instant::now());
                         }
                     }
@@ -278,10 +279,13 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
             };
         }
         KeyCode::Tab => {
-            // Cycle through modes: Main -> Bandwidth -> Overview -> Main
-            if app.mode == AppMode::SystemOverview {
-                // Currently in overview mode, go back to normal
+            // Cycle through modes: Main -> Bandwidth -> Overview -> Settings -> Main
+            if app.mode == AppMode::Settings {
+                // Currently in settings mode, go back to normal
                 app.mode = AppMode::Normal;
+            } else if app.mode == AppMode::SystemOverview {
+                // Currently in overview mode, go to settings
+                app.mode = AppMode::Settings;
             } else if app.bandwidth_mode {
                 // Currently in bandwidth mode, go to overview
                 app.mode = AppMode::SystemOverview;
@@ -368,8 +372,8 @@ fn handle_overview_mode_keys(app: &mut App, key: KeyCode) -> bool {
             app.mode = AppMode::Normal;
         }
         KeyCode::Tab => {
-            // Cycle from SystemOverview to Main mode
-            app.mode = AppMode::Normal;
+            // Cycle from SystemOverview to Settings mode
+            app.mode = AppMode::Settings;
         }
         KeyCode::Char('r') => {
             // Reset threshold exceeded state
@@ -397,6 +401,40 @@ fn handle_overview_mode_keys(app: &mut App, key: KeyCode) -> bool {
             let max_scroll = app.alerts.len().saturating_sub(1);
             if app.alert_scroll_offset < max_scroll {
                 app.alert_scroll_offset += 1;
+            }
+        }
+        _ => {}
+    }
+    false
+}
+
+/// Handle key events in settings mode
+fn handle_settings_mode_keys(app: &mut App, key: KeyCode) -> bool {
+    match key {
+        KeyCode::Char('q') => return true, // Quit application
+        KeyCode::Esc => {
+            // Go back to main mode
+            app.mode = AppMode::Normal;
+        }
+        KeyCode::Tab => {
+            // Cycle from Settings back to Main mode
+            app.mode = AppMode::Normal;
+        }
+        KeyCode::Char('r') => {
+            // Reset configuration
+            match crate::config::reset_config() {
+                Ok(true) => {
+                    app.settings_notification = Some("✅ Configuration removed successfully! Exit and restart the tool to reconfigure.".to_string());
+                    app.settings_notification_time = Some(std::time::Instant::now());
+                }
+                Ok(false) => {
+                    app.settings_notification = Some("ℹ️ No saved configuration found to remove.".to_string());
+                    app.settings_notification_time = Some(std::time::Instant::now());
+                }
+                Err(_) => {
+                    app.settings_notification = Some("❌ Error removing configuration.".to_string());
+                    app.settings_notification_time = Some(std::time::Instant::now());
+                }
             }
         }
         _ => {}

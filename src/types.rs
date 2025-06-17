@@ -112,6 +112,7 @@ pub enum AppMode {
     Normal,
     EditingAlert,
     SystemOverview,
+    Settings,
 }
 
 pub enum EditingField {
@@ -176,6 +177,9 @@ pub struct App {
     // Chart persistence fields
     pub process_last_active: HashMap<i32, Instant>, // Track when each process last had non-zero traffic
     pub last_nonzero_system_stats: SystemStats, // Keep last non-zero system stats for display
+    // Settings mode fields
+    pub settings_notification: Option<String>, // Notification for settings mode
+    pub settings_notification_time: Option<Instant>, // When settings notification was set
 }
 
 impl App {
@@ -224,6 +228,9 @@ impl App {
             // Chart persistence fields
             process_last_active: HashMap::new(),
             last_nonzero_system_stats: SystemStats::new(),
+            // Settings mode fields
+            settings_notification: None, // Notification for settings mode
+            settings_notification_time: None, // When settings notification was set
         }
     }
 
