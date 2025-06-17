@@ -1,7 +1,10 @@
 use crossterm::event::KeyCode;
 use crate::types::{Alert, AlertAction, App, AppMode, SortColumn, SortDirection, EditingField, ChartType, MetricsMode};
 use crate::ui::utils::{parse_input_to_bytes, format_bytes};
+
+#[cfg(target_os = "linux")]
 use nix::sys::signal::{self, Signal};
+#[cfg(target_os = "linux")]
 use nix::unistd::Pid;
 
 /// Handle keyboard input events for all application modes
@@ -139,11 +142,45 @@ fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
 
                 match action_str {
                     "Kill" => {
-                        if signal::kill(Pid::from_raw(pid), Signal::SIGKILL).is_ok() {
+                        let kill_success = {
+                            #[cfg(target_os = "linux")]
+                            {
+                                signal::kill(Pid::from_raw(pid), Signal::SIGKILL).is_ok()
+                            }
+                            
+                            #[cfg(target_os = "windows")]
+                            {
+                                use std::process::Command;
+                                let output = Command::new("taskkill")
+                                    .args(["/PID", &pid.to_string(), "/F"])
+                                    .stdout(std::process::Stdio::null()) // Suppress stdout
+                                    .stderr(std::process::Stdio::null()) // Suppress stderr
+                                    .output();
+                                
+                                match output {
+                                    Ok(result) => result.status.success(),
+                                    Err(_) => false,
+                                }
+                            }
+                        };
+                        
+                        if kill_success {
+                            let process_name = app.stats.get(&pid)
+                                .map(|info| info.name.clone())
+                                .unwrap_or_else(|| format!("PID {}", pid));
+                            
+                            app.kill_notification = Some(format!("✅ Successfully killed {} (PID {}) (Esc to dismiss)", process_name, pid));
+                            app.kill_notification_time = Some(std::time::Instant::now());
+                            
+                            // Remove process immediately from stats and alerts
                             app.stats.remove(&pid);
                             app.alerts.remove(&pid);
+                            
                             app.killed_processes.insert(pid);
                             app.selected_process = None;
+                        } else {
+                            app.kill_notification = Some(format!("❌ Failed to kill process (PID {}) (Esc to dismiss)", pid));
+                            app.kill_notification_time = Some(std::time::Instant::now());
                         }
                     }
                     "Edit" => {
@@ -191,9 +228,11 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Char('q') => return true,
         KeyCode::Esc => {
             // Dismiss notification boxes when Esc is pressed
-            if app.last_alert_message.is_some() || !app.command_execution_log.is_empty() {
+            if app.last_alert_message.is_some() || !app.command_execution_log.is_empty() || app.kill_notification.is_some() {
                 app.last_alert_message = None;
                 app.last_alert_message_time = None;
+                app.kill_notification = None;
+                app.kill_notification_time = None;
                 app.command_execution_log.clear();
             }
         },

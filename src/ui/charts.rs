@@ -181,98 +181,106 @@ fn truncate_process_name(name: &str, max_len: usize) -> String {
     }
 }
 
-/// Highly optimized chart dataset update function with throttling
+/// Highly optimized chart dataset update function with throttling and persistence
 pub fn update_chart_datasets(app: &mut App) {
-    // Early return if not in stacked mode or no history
-    if app.chart_type != ChartType::SystemStacked || app.system_bandwidth_history.is_empty() {
+    if app.chart_type != ChartType::SystemStacked {
         if !app.chart_datasets.is_empty() {
             app.chart_datasets.clear();
         }
         return;
     }
-
-    // Throttle updates to avoid expensive recalculations (max once per 500ms)
+    
+    // Throttle updates to avoid expensive recalculations on every tick
     let now = std::time::Instant::now();
     if now.duration_since(app.last_chart_update).as_millis() < 500 {
-        return; // Skip update if too recent
+        return;
     }
     app.last_chart_update = now;
 
-    // Get top 5 processes by recent activity for readability
-    let mut top_processes: Vec<(i32, u64, String)> = app.stats.iter()
-        .map(|(pid, info)| (*pid, info.sent_rate + info.received_rate, info.name.clone()))
+    // Update process activity tracking
+    let current_time = now;
+    for (pid, info) in &app.stats {
+        let total_rate = info.sent_rate + info.received_rate;
+        if total_rate > 0 {
+            app.process_last_active.insert(*pid, current_time);
+        }
+    }
+
+    // Calculate 5-second average rates for more stable ranking
+    let now_secs = app.start_time.elapsed().as_secs_f64();
+    let calculate_avg_rate = |history: &[(f64, f64)]| -> u64 {
+        let recent_samples: Vec<f64> = history.iter()
+            .rev()
+            .take_while(|(t, _)| now_secs - *t < 5.0)
+            .map(|(_, v)| *v)
+            .collect();
+        
+        if recent_samples.is_empty() {
+            0
+        } else {
+            (recent_samples.iter().sum::<f64>() / recent_samples.len() as f64) as u64
+        }
+    };
+
+    // Rank processes by 5-second average rate, but keep recently active processes visible
+    let mut process_scores: Vec<_> = app.stats.iter()
+        .map(|(pid, info)| {
+            let avg_sent = calculate_avg_rate(&info.sent_history);
+            let avg_received = calculate_avg_rate(&info.received_history);
+            let avg_total = avg_sent + avg_received;
+            
+            // Boost score for recently active processes (within last 10 seconds)
+            let boost = if let Some(last_active) = app.process_last_active.get(pid) {
+                if current_time.duration_since(*last_active).as_secs() < 10 {
+                    1000 // Add 1KB/s equivalent boost to keep recently active processes visible
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+            
+            (*pid, avg_total + boost)
+        })
         .collect();
+
+    process_scores.sort_by(|a, b| b.1.cmp(&a.1));
     
-    // Sort by bandwidth usage (descending) and take top 5
-    top_processes.sort_by(|a, b| b.1.cmp(&a.1));
-    let top_pids: Vec<(i32, String)> = top_processes.into_iter()
+    let top_pids: HashSet<i32> = process_scores.into_iter()
         .take(5)
-        .map(|(pid, _, name)| (pid, name))
+        .map(|(pid, _)| pid)
         .collect();
 
-    // Pre-allocate with known capacity
-    let mut new_datasets = Vec::with_capacity(5);
-
-    // Available colors for assignment
-    static AVAILABLE_COLORS: &[Color] = &[
-        Color::Red, Color::Green, Color::Blue, Color::Yellow, Color::Magenta,
-        Color::Cyan, Color::LightRed, Color::LightGreen, Color::LightBlue, Color::LightYellow,
-        Color::LightMagenta, Color::LightCyan, Color::DarkGray, Color::Gray, Color::White
+    let mut new_datasets = Vec::new();
+    
+    // Palette for assigning new colors to processes
+    const COLORS: &[Color] = &[
+        Color::Cyan, Color::Magenta, Color::Green, Color::Yellow, Color::Blue,
+        Color::LightRed, Color::LightGreen, Color::LightBlue,
     ];
 
-    // ----------------------------------------------------------------------------------
-    // Build chart datasets in a single pass over history for all top PIDs (O(H + E))
-    // ----------------------------------------------------------------------------------
-    use std::collections::HashMap;
-
-    // Prepare structures for fast lookup & storage
-    let top_pid_set: HashSet<i32> = top_pids.iter().map(|(pid, _)| *pid).collect();
-    let mut data_map: HashMap<i32, Vec<(f64, f64)>> = top_pid_set
-        .iter()
-        .map(|pid| (*pid, Vec::with_capacity(app.system_bandwidth_history.len())))
-        .collect();
-
-    // Iterate once over the historical snapshots
-    for (timestamp, snapshot) in &app.system_bandwidth_history {
-        // First push default 0 for every tracked pid so vector lengths stay aligned
-        for &pid in &top_pid_set {
-            data_map.get_mut(&pid).unwrap().push((*timestamp, 0.0));
+    for (pid, info) in &app.stats {
+        if !top_pids.contains(pid) {
+            continue;
         }
-        // Update with real values where available
-        for (pid, sent, recv) in snapshot {
-            if top_pid_set.contains(pid) {
-                let value = match app.metrics_mode {
-                    MetricsMode::Combined => sent + recv,
-                    MetricsMode::SendOnly => *sent,
-                    MetricsMode::ReceiveOnly => *recv,
-                };
-                if let Some(entry) = data_map.get_mut(pid).and_then(|v| v.last_mut()) {
-                    entry.1 = value;
-                }
-            }
-        }
-    }
 
-    for (pid, process_name) in top_pids {
-        let process_color = if let Some(&existing_color) = app.process_colors.get(&process_name) {
-            existing_color
-        } else {
-            // Find a color that's not already in use, or cycle through if all are used
-            let used_colors: HashSet<Color> = app.process_colors.values().cloned().collect();
-            let new_color = AVAILABLE_COLORS.iter()
-                .find(|&&color| !used_colors.contains(&color))
-                .copied()
-                .unwrap_or(AVAILABLE_COLORS[app.process_colors.len() % AVAILABLE_COLORS.len()]);
-            app.process_colors.insert(process_name.clone(), new_color);
-            new_color
+        let len = app.process_colors.len();
+        let color = *app.process_colors.entry(*pid).or_insert_with(|| {
+            COLORS[len % COLORS.len()]
+        });
+        
+        let data = match app.metrics_mode {
+            MetricsMode::Combined => {
+                info.sent_history.iter().zip(&info.received_history)
+                    .map(|((t, s), (_, r))| (*t, *s + *r))
+                    .collect()
+            },
+            MetricsMode::SendOnly => info.sent_history.clone(),
+            MetricsMode::ReceiveOnly => info.received_history.clone(),
         };
 
-        if let Some(process_data) = data_map.remove(&pid) {
-            if !process_data.is_empty() {
-                new_datasets.push((process_name, process_data, process_color));
-            }
-        }
+        new_datasets.push((info.name.clone(), data, color));
     }
-
+    
     app.chart_datasets = new_datasets;
 } 

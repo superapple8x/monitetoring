@@ -11,7 +11,6 @@ use crate::types::{App, AppMode};
 
 // Re-export the main public functions
 pub use terminal::{setup_terminal, restore_terminal};
-pub use input::handle_key_event;
 pub use charts::update_chart_datasets;
 
 /// Main UI rendering function that delegates to specific mode renderers

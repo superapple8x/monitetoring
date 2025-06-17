@@ -14,38 +14,46 @@ pub fn render(f: &mut Frame, app: &App) {
     let is_cramped = terminal_height < 25; // Detect if we're in a cramped terminal (raised threshold)
     
     // Check if we have messages to show
-    let recent_log_entry = app.command_execution_log.last();
-    let has_messages = app.last_alert_message.is_some() || recent_log_entry.is_some();
+    let recent_log_entry = app.command_execution_log.back();
+    let has_messages = app.last_alert_message.is_some() || recent_log_entry.is_some() || app.kill_notification.is_some();
     
+    // Determine number of footer message boxes
+    let footer_boxes = {
+        let mut n = 0;
+        if app.last_alert_message.is_some() { n += 1; }
+        if app.command_execution_log.back().is_some() { n += 1; }
+        n
+    };
+    let footer_height = if footer_boxes == 0 { 0 } else { 3 * footer_boxes };
+
     // Adaptive layout based on whether we have messages to show and if action panel is active
     let main_chunks = if has_messages {
-        // When messages exist, allocate space for them
+        // When messages exist, allocate space exactly for them
         Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
-                Constraint::Length(3), // Navigation
-                Constraint::Min(0),    // Main content (Table + Action Panel)
-                if app.show_action_panel { 
-                    Constraint::Length(0) // Hide totals when action panel is shown
-                } else { 
-                    Constraint::Length(3) // Totals
+                Constraint::Length(3),  // Navigation
+                Constraint::Min(0),     // Main content (Table + Action Panel)
+                if app.show_action_panel {
+                    Constraint::Length(0)
+                } else {
+                    if app.kill_notification.is_some() { Constraint::Length(6) } else { Constraint::Length(3) }
                 },
-                Constraint::Length(6), // Footer / Alert Message (space for dual messages)
+                Constraint::Length(footer_height as u16), // Footer height based on messages
             ])
             .split(f.size())
     } else {
-        // When no messages, expand main content area
         Layout::default()
             .direction(Direction::Vertical)
             .margin(1)
             .constraints([
-                Constraint::Length(3), // Navigation
-                Constraint::Min(0),    // Main content (Table + Action Panel) - expanded
-                if app.show_action_panel { 
-                    Constraint::Length(0) // Hide totals when action panel is shown
-                } else { 
-                    Constraint::Length(3) // Totals
+                Constraint::Length(3),  // Navigation
+                Constraint::Min(0),     // Main content
+                if app.show_action_panel {
+                    Constraint::Length(0)
+                } else {
+                    if app.kill_notification.is_some() { Constraint::Length(6) } else { Constraint::Length(3) }
                 },
             ])
             .split(f.size())
@@ -115,14 +123,17 @@ pub fn render(f: &mut Frame, app: &App) {
     
     // Only render footer if we have messages to show
     if has_messages {
-        let footer_index = if !app.show_action_panel { 3 } else { 2 };
-        if footer_index < main_chunks.len() {
-            render_footer(f, app, main_chunks[footer_index]);
+        if footer_height > 0 {
+            let footer_index = if !app.show_action_panel { 3 } else { 2 };
+            if footer_index < main_chunks.len() {
+                render_footer(f, app, main_chunks[footer_index]);
+            }
         }
     }
 }
 
-/// Render the process table
+/// Render the process table (Linux / Unix-like builds)
+#[cfg(not(windows))]
 fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let header_titles_str = if app.show_total_columns {
         if app.containers_mode {
@@ -184,7 +195,7 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let sorted_stats = app.sorted_stats();
     let rows = sorted_stats.iter().map(|(pid, data)| {
         let mut style = Style::default();
-        if data.has_alert {
+        if app.alerts.contains_key(pid) {
             style = style.bg(Color::Yellow).fg(Color::Black);
         }
         if app.selected_process == Some(**pid) {
@@ -299,6 +310,104 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     f.render_stateful_widget(table, area, &mut table_state);
 }
 
+/// Render the process table (Windows build – no container or user columns)
+#[cfg(windows)]
+fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
+    use ratatui::widgets::{TableState, Row, Cell};
+    use ratatui::layout::Constraint;
+    use ratatui::style::{Color, Style, Modifier};
+
+    // Build header titles – simplified for Windows
+    let header_titles_str: Vec<&str> = if app.show_total_columns {
+        vec!["(P)ID", "(N)ame", "Sent/s", "(S)Tot", "Recv/s", "(R)Tot"]
+    } else {
+        vec!["(P)ID", "(N)ame", "Sent/s", "Recv/s"]
+    };
+
+    let mut header_titles: Vec<String> = header_titles_str.iter().map(|s| s.to_string()).collect();
+
+    // Apply sort indicator – skip User / Container because they are hidden on Windows
+    let sort_indicator = if app.sort_direction == SortDirection::Asc { " ▲" } else { " ▼" };
+    match app.sort_by {
+        SortColumn::Pid => header_titles[0].push_str(sort_indicator),
+        SortColumn::Name => header_titles[1].push_str(sort_indicator),
+        SortColumn::Sent | SortColumn::SentRate => {
+            // Sent columns depend on totals mode
+            if app.show_total_columns { header_titles[3].push_str(sort_indicator) } else { header_titles[2].push_str(sort_indicator) }
+        }
+        SortColumn::Received | SortColumn::ReceivedRate => {
+            if app.show_total_columns { header_titles[5].push_str(sort_indicator) } else { header_titles[3].push_str(sort_indicator) }
+        }
+        _ => {}
+    }
+
+    let header_cells: Vec<_> = header_titles
+        .iter()
+        .map(|h| Cell::from(h.as_str()).style(Style::default().fg(Color::Red)))
+        .collect();
+    let header = Row::new(header_cells);
+
+    let sorted_stats = app.sorted_stats();
+    let rows = sorted_stats.iter().map(|(pid, data)| {
+        let mut style = Style::default();
+        if app.alerts.contains_key(pid) {
+            style = style.bg(Color::Yellow).fg(Color::Black);
+        }
+        if app.selected_process == Some(**pid) { style = style.add_modifier(Modifier::BOLD); }
+
+        // Build cells without user / container columns
+        let mut cells = vec![
+            Cell::from(pid.to_string()),
+            Cell::from(data.name.clone()),
+        ];
+
+        if app.show_total_columns {
+            cells.push(Cell::from(format!("{}/s", format_bytes(data.sent_rate))));
+            cells.push(Cell::from(format_bytes(data.sent)));
+            cells.push(Cell::from(format!("{}/s", format_bytes(data.received_rate))));
+            cells.push(Cell::from(format_bytes(data.received)));
+        } else {
+            cells.push(Cell::from(format!("{}/s", format_bytes(data.sent_rate))));
+            cells.push(Cell::from(format!("{}/s", format_bytes(data.received_rate))));
+        }
+
+        Row::new(cells).style(style)
+    });
+
+    // Define column widths proportionally (they don't need to sum to 100)
+    let widths: Vec<Constraint> = if app.show_total_columns {
+        vec![
+            Constraint::Percentage(12),  // PID
+            Constraint::Percentage(28),  // Name
+            Constraint::Percentage(15),  // Sent/s
+            Constraint::Percentage(15),  // (S)Tot
+            Constraint::Percentage(15),  // Recv/s
+            Constraint::Percentage(15),  // (R)Tot
+        ]
+    } else {
+        vec![
+            Constraint::Percentage(15),  // PID
+            Constraint::Percentage(40),  // Name
+            Constraint::Percentage(22),  // Sent/s
+            Constraint::Percentage(23),  // Recv/s
+        ]
+    };
+
+    let table = Table::new(rows, &widths)
+        .header(header)
+        .block(Block::default().borders(Borders::ALL).title("Processes"));
+
+    // Stateful selection handling (same as Unix version)
+    let mut table_state = TableState::default();
+    if let Some(selected_pid) = app.selected_process {
+        if let Some(index) = sorted_stats.iter().position(|(pid, _)| **pid == selected_pid) {
+            table_state.select(Some(index));
+        }
+    }
+    
+    f.render_stateful_widget(table, area, &mut table_state);
+}
+
 /// Render the action panel
 fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is_cramped: bool) {
     let action_panel_text = if let Some(pid) = app.selected_process {
@@ -381,23 +490,56 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is
 
 /// Render the totals bar
 fn render_totals_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let (total_sent, total_received, total_sent_rate, total_received_rate) = app.totals();
-    let totals_text = format!(
-        "📊 TOTALS: Sent {}/s ({} total) | Received {}/s ({} total)",
-        format_bytes(total_sent_rate),
-        format_bytes(total_sent),
-        format_bytes(total_received_rate),
-        format_bytes(total_received)
-    );
-    let totals = Paragraph::new(totals_text)
-        .block(Block::default().borders(Borders::ALL).title("Network Totals"));
-    f.render_widget(totals, area);
+    if let Some(kill_msg) = &app.kill_notification {
+        // Split area: totals on top, kill notification below
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Length(3)].as_ref())
+            .split(area);
+        
+        // Render totals in top chunk
+        let (total_sent, total_received, total_sent_rate, total_received_rate) = app.totals();
+        let totals_text = format!(
+            "📊 TOTALS: Sent {}/s ({} total) | Received {}/s ({} total)",
+            format_bytes(total_sent_rate),
+            format_bytes(total_sent),
+            format_bytes(total_received_rate),
+            format_bytes(total_received)
+        );
+        let totals = Paragraph::new(totals_text)
+            .block(Block::default().borders(Borders::ALL).title("Network Totals"));
+        f.render_widget(totals, chunks[0]);
+        
+        // Render kill notification in bottom chunk
+        let kill_style = if kill_msg.starts_with("✅") {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default().fg(Color::Red)
+        };
+        let kill_notification = Paragraph::new(kill_msg.as_str())
+            .style(kill_style)
+            .block(Block::default().borders(Borders::ALL).title("Process Action (Esc to dismiss)"));
+        f.render_widget(kill_notification, chunks[1]);
+    } else {
+        // No kill notification, render totals normally
+        let (total_sent, total_received, total_sent_rate, total_received_rate) = app.totals();
+        let totals_text = format!(
+            "📊 TOTALS: Sent {}/s ({} total) | Received {}/s ({} total)",
+            format_bytes(total_sent_rate),
+            format_bytes(total_sent),
+            format_bytes(total_received_rate),
+            format_bytes(total_received)
+        );
+        let totals = Paragraph::new(totals_text)
+            .block(Block::default().borders(Borders::ALL).title("Network Totals"));
+        f.render_widget(totals, area);
+    }
 }
 
 /// Render the footer
 fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Check if we have recent command execution or alert message
-    let recent_log_entry = app.command_execution_log.last();
+    let recent_log_entry = app.command_execution_log.back();
     
     if let Some(msg) = &app.last_alert_message {
         if let Some((timestamp, log_msg)) = recent_log_entry {

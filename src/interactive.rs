@@ -1,6 +1,11 @@
 use std::io::{self, Write};
 use pcap::Device;
 use crate::config::{SavedConfig, load_config, save_config};
+use std::collections::HashMap;
+use std::time::{Duration, Instant};
+use std::thread;
+use pcap::Capture;
+use crate::capture::connection_from_packet;
 
 pub struct InteractiveConfig {
     pub interface: String,
@@ -112,8 +117,6 @@ impl DisplayHelper {
         println!("   📈 Show total columns: {}", if show_total_columns { "Yes" } else { "No" });
         println!();
     }
-
-
 }
 
 /// Enhanced device information with validation
@@ -121,6 +124,7 @@ struct NetworkInterface {
     name: String,
     description: Option<String>,
     is_up: bool,
+    traffic_bytes: u64,  // Total bytes observed during measurement period
 }
 
 impl NetworkInterface {
@@ -129,13 +133,76 @@ impl NetworkInterface {
             name: device.name,
             description: device.desc,
             is_up: device.flags.is_up(),
+            traffic_bytes: 0,
         }
     }
 
-    fn display_line(&self, index: usize) -> String {
+    fn display_line(&self, index: usize, is_recommended: bool) -> String {
         let status = if self.is_up { "🟢" } else { "🔴" };
         let desc = self.description.as_deref().unwrap_or("No description");
-        format!("   {}. {} {} - {}", index + 1, status, self.name, desc)
+        let traffic_info = if self.traffic_bytes > 0 {
+            format!(" [{}]", format_bytes(self.traffic_bytes))
+        } else {
+            String::new()
+        };
+        let recommended = if is_recommended { " (recommended)" } else { "" };
+        format!("   {}. {} {}{}{} - {}", index + 1, status, self.name, traffic_info, recommended, desc)
+    }
+
+    fn measure_traffic(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // Skip measurement for interfaces that are down
+        if !self.is_up {
+            return Ok(());
+        }
+
+        let device = Device::from(self.name.as_str());
+        let cap = Capture::from_device(device)?
+            .timeout(100)  // Short timeout for quick sampling
+            .open();
+        
+        let mut cap = match cap {
+            Ok(c) => c,
+            Err(_) => return Ok(()), // Skip interfaces we can't open
+        };
+
+        let start_time = Instant::now();
+        let mut total_bytes = 0u64;
+
+        // Measure for exactly 5 seconds
+        while start_time.elapsed() < Duration::from_secs(5) {
+            match cap.next_packet() {
+                Ok(packet) => {
+                    total_bytes += packet.data.len() as u64;
+                }
+                Err(_) => {
+                    // Timeout or error, continue sampling
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+        }
+
+        self.traffic_bytes = total_bytes;
+        Ok(())
+    }
+}
+
+// Helper function to format bytes (same as in ui/utils.rs)
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    const THRESHOLD: f64 = 1024.0;
+    
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+    
+    let bytes_f = bytes as f64;
+    let unit_index = (bytes_f.log(THRESHOLD).floor() as usize).min(UNITS.len() - 1);
+    let size = bytes_f / THRESHOLD.powi(unit_index as i32);
+    
+    if unit_index == 0 {
+        format!("{} {}", bytes, UNITS[unit_index])
+    } else {
+        format!("{:.1} {}", size, UNITS[unit_index])
     }
 }
 
@@ -150,18 +217,21 @@ pub fn run_interactive_mode() -> Result<Option<InteractiveConfig>, io::Error> {
 }
 
 fn handle_existing_config(saved: SavedConfig) -> Result<Option<InteractiveConfig>, io::Error> {
+    // Windows build: force container awareness off regardless of saved setting
+    let containers_mode_effective = if cfg!(windows) { false } else { saved.containers_mode };
+
     // Auto-use saved configuration for faster startup
     println!("🎯 Using Saved Configuration");
     println!("   📡 Interface: {}", saved.interface);
     println!("   📊 Mode: {}", if saved.json_mode { "JSON output" } else { "Interactive TUI" });
-    println!("   🐳 Container awareness: {}", if saved.containers_mode { "Enabled" } else { "Disabled" });
+    println!("   🐳 Container awareness: {}", if containers_mode_effective { "Enabled" } else { "Disabled" });
     println!("🚀 Starting monitoring...");
     println!();
     
     Ok(Some(InteractiveConfig {
         interface: saved.interface,
         json_mode: saved.json_mode,
-        containers_mode: saved.containers_mode,
+        containers_mode: containers_mode_effective,
         show_total_columns: saved.show_total_columns,
     }))
 }
@@ -260,19 +330,68 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
             return Ok(None);
         }
 
-        let interfaces: Vec<NetworkInterface> = devices
+        let mut interfaces: Vec<NetworkInterface> = devices
             .into_iter()
             .map(NetworkInterface::from_device)
             .collect();
 
+        // Measure traffic on all interfaces for 5 seconds
+        println!("📊 Measuring traffic on interfaces for 5 seconds...");
+        println!("   (This helps identify the busiest interface)");
+        println!();
+        
+        // Use threading to measure multiple interfaces concurrently
+        let mut handles = vec![];
+        for interface in &mut interfaces {
+            if interface.is_up {
+                let interface_name = interface.name.clone();
+                let handle = thread::spawn(move || {
+                    let mut temp_interface = NetworkInterface {
+                        name: interface_name.clone(),
+                        description: None,
+                        is_up: true,
+                        traffic_bytes: 0,
+                    };
+                    let _ = temp_interface.measure_traffic();
+                    (interface_name, temp_interface.traffic_bytes)
+                });
+                handles.push(handle);
+            }
+        }
+        
+        // Collect results
+        let mut traffic_results: HashMap<String, u64> = HashMap::new();
+        for handle in handles {
+            if let Ok((name, bytes)) = handle.join() {
+                traffic_results.insert(name, bytes);
+            }
+        }
+        
+        // Update interfaces with measured traffic
+        for interface in &mut interfaces {
+            if let Some(&traffic) = traffic_results.get(&interface.name) {
+                interface.traffic_bytes = traffic;
+            }
+        }
+        
+        // Sort interfaces by traffic (descending), with up interfaces first
+        interfaces.sort_by(|a, b| {
+            match (a.is_up, b.is_up) {
+                (true, false) => std::cmp::Ordering::Less,   // Up interfaces first
+                (false, true) => std::cmp::Ordering::Greater, // Down interfaces last
+                _ => b.traffic_bytes.cmp(&a.traffic_bytes),   // Sort by traffic within same status
+            }
+        });
+
         // Display interfaces with enhanced information
         for (i, interface) in interfaces.iter().enumerate() {
-            println!("{}", interface.display_line(i));
+            let is_recommended = i == 0 && interface.is_up && interface.traffic_bytes > 0;
+            println!("{}", interface.display_line(i, is_recommended));
         }
         
         println!("   0. Quit");
         println!();
-        println!("🟢 = Interface is up   🔴 = Interface is down");
+        println!("🟢 = Interface is up   🔴 = Interface is down   [traffic] = Bytes observed in 5s");
         println!();
         
         match InputHandler::numeric_choice_prompt("📡 Select interface (number)", 0, interfaces.len())? {
@@ -311,13 +430,21 @@ fn choose_mode() -> Result<(bool, bool), io::Error> {
             }
         };
 
-        // Ask about container awareness
+        // On Windows builds, skip the container awareness prompt entirely and disable the feature.
+        if cfg!(windows) {
+            println!();
+            println!("🐳 Container awareness is not available on Windows and will be disabled.");
+            println!();
+            return Ok((json_mode, false));
+        }
+
+        // Ask about container awareness (Linux / macOS)
         println!();
         println!("🐳 Container Awareness:");
         println!("   This feature identifies and groups processes by container");
         println!("   (Docker, Podman, LXC, etc.)");
         println!();
-        
+
         let containers_mode = InputHandler::confirm_prompt("🐳 Enable container awareness?", false)?;
 
         return Ok((json_mode, containers_mode));

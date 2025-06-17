@@ -14,15 +14,18 @@ use tokio::sync::mpsc;
 use crossterm::event::{self, Event};
 use std::io;
 use std::thread;
+#[cfg(target_os = "linux")]
 use nix::sys::signal::{self, Signal};
+#[cfg(target_os = "linux")]
 use nix::unistd::Pid;
+#[cfg(target_os = "linux")]
 use nix::errno::Errno;
 
 use config::{Cli, reset_config, load_config};
-use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction, ChartType, PROCESS_CLEANUP_INTERVAL_SECS};
-use process::{refresh_proc_maps, cleanup_dead_processes, should_track_process};
+use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction, PROCESS_CLEANUP_INTERVAL_SECS};
+use process::{refresh_proc_maps, cleanup_dead_processes};
 use capture::connection_from_packet;
-use ui::{setup_terminal, restore_terminal, render_ui, handle_key_event, update_chart_datasets, utils::format_bytes};
+use ui::utils::format_bytes;
 use interactive::run_interactive_mode;
 
 fn display_startup_info(iface: &str, is_json: bool, containers_enabled: bool) {
@@ -34,7 +37,7 @@ fn display_startup_info(iface: &str, is_json: bool, containers_enabled: bool) {
         eprintln!("⏱️  Preparing to capture network traffic... (Press 'q' to quit)");
         eprintln!();
         eprintln!("🎯 Tip: Press 'p' for PID, 'n' for Name, 'u' for User, 's' for Sent, 'r' for Received{}", 
-                 if containers_enabled { ", 'c' for Container" } else { "" });
+                 if containers_enabled { ", 'c' for Container" } else { ""});
         eprintln!("📊 Sorting: Higher bandwidth usage appears at the top");
         eprintln!();
     } else {
@@ -74,43 +77,69 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
             (false, Some(format!("🚨 System Alert for {} (PID {}):\nExceeded bandwidth threshold", name, pid)), None)
         }
         AlertAction::Kill => {
-            // First, send the kill signal
-            match signal::kill(Pid::from_raw(pid), Signal::SIGKILL) {
-                Ok(_) => {
-                    // Signal sent, now verify process termination
-                }
-                Err(e) if e == Errno::ESRCH => {
-                    // Process already doesn't exist, which is a success in this context
-                    return (true, Some(format!("💀 Process {} (PID {}) was already gone", name, pid)), None);
-                }
-                Err(e) => {
-                    // Another error, like permissions
-                    return (false, Some(format!("❌ Failed to send kill signal to {} (PID {}): {}", name, pid, e)), None);
-                }
-            }
-
-            // Poll for up to 2 seconds to see if the process terminates
-            let start = Instant::now();
-            while start.elapsed() < Duration::from_secs(2) {
-                // Check if process exists by sending signal 0
-                match signal::kill(Pid::from_raw(pid), None) {
+            #[cfg(target_os = "linux")]
+            {
+                // First, send the kill signal
+                match signal::kill(Pid::from_raw(pid), Signal::SIGKILL) {
                     Ok(_) => {
-                        // Process still exists, wait a bit
-                        thread::sleep(Duration::from_millis(100));
+                        // Signal sent, now verify process termination
                     }
                     Err(e) if e == Errno::ESRCH => {
-                        // Process does not exist, success!
-                        return (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)), None);
+                        // Process already doesn't exist, which is a success in this context
+                        return (true, Some(format!("💀 Process {} (PID {}) was already gone", name, pid)), None);
                     }
-                    Err(_) => {
-                        // Some other error, assume failure to check
-                        break;
+                    Err(e) => {
+                        // Another error, like permissions
+                        return (false, Some(format!("❌ Failed to send kill signal to {} (PID {}): {}", name, pid, e)), None);
+                    }
+                }
+
+                // Poll for up to 2 seconds to see if the process terminates
+                let start = Instant::now();
+                while start.elapsed() < Duration::from_secs(2) {
+                    // Check if process exists by sending signal 0
+                    match signal::kill(Pid::from_raw(pid), None) {
+                        Ok(_) => {
+                            // Process still exists, wait a bit
+                            thread::sleep(Duration::from_millis(100));
+                        }
+                        Err(e) if e == Errno::ESRCH => {
+                            // Process does not exist, success!
+                            return (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)), None);
+                        }
+                        Err(_) => {
+                            // Some other error, assume failure to check
+                            break;
+                        }
+                    }
+                }
+
+                // If the loop finishes and we haven't returned, the process is still alive
+                (false, Some(format!("❌ Failed to kill {} (PID {}): Process still running", name, pid)), None)
+            }
+            
+            #[cfg(target_os = "windows")]
+            {
+                // Use taskkill command on Windows
+                let output = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F"])
+                    .stdout(std::process::Stdio::null()) // Suppress stdout
+                    .stderr(std::process::Stdio::null()) // Suppress stderr
+                    .output();
+                
+                match output {
+                    Ok(result) if result.status.success() => {
+                        (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)), None)
+                    }
+                    Ok(result) => {
+                        let stderr_msg = String::from_utf8_lossy(&result.stderr);
+                        (false, Some(format!("❌ Failed to kill {} (PID {}): taskkill command failed", name, pid)), None)
+                    }
+                    Err(e) => {
+                        (false, Some(format!("❌ Failed to execute taskkill for {} (PID {}): {}", name, pid, e)), None)
                     }
                 }
             }
-
-            // If the loop finishes and we haven't returned, the process is still alive
-            (false, Some(format!("❌ Failed to kill {} (PID {}): Process still running", name, pid)), None)
         }
         AlertAction::CustomCommand(cmd) => {
             let start_time = Instant::now();
@@ -123,9 +152,21 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
                 ((total_usage as f64 / threshold as f64 - 1.0) * 100.0) as u32
             );
             
-            let mut command = Command::new("sh");
-            command.arg("-c").arg(cmd)
-                .env("MONITETORING_PID", pid.to_string())
+            #[cfg(target_os = "linux")]
+            let mut command = {
+                let mut cmd_builder = Command::new("sh");
+                cmd_builder.arg("-c").arg(cmd);
+                cmd_builder
+            };
+            
+            #[cfg(target_os = "windows")]
+            let mut command = {
+                let mut cmd_builder = Command::new("cmd");
+                cmd_builder.arg("/C").arg(cmd);
+                cmd_builder
+            };
+            
+            command.env("MONITETORING_PID", pid.to_string())
                 .env("MONITETORING_PROCESS_NAME", name)
                 .env("MONITETORING_BANDWIDTH_EXCEEDED", "true")
                 .env("MONITETORING_SENT_BYTES", current_sent.to_string())
@@ -199,6 +240,45 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
 async fn main() -> Result<(), io::Error> {
     let cli = Cli::parse();
 
+    // Collect startup warnings to display in the UI once it launches
+    let mut startup_warning: Option<String> = None;
+
+    // Check for root privileges on Linux
+    #[cfg(target_os = "linux")]
+    {
+        if unsafe { libc::geteuid() } != 0 {
+            eprintln!("❌ Root privileges required on Linux!");
+            eprintln!();
+            eprintln!("This tool needs to capture network packets, which requires root access.");
+            eprintln!("Please run with sudo:");
+            eprintln!("  sudo {}", std::env::args().collect::<Vec<_>>().join(" "));
+            eprintln!();
+            std::process::exit(1);
+        }
+    }
+
+    // Check for administrator privileges on Windows
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::Command;
+        let output = Command::new("net").args(["session"]).output();
+        match output {
+            Ok(result) if result.status.success() => {
+                // Administrator – nothing to do
+            }
+            _ => {
+                // Not admin – store warning to propagate to UI later
+                startup_warning = Some("⚠️ Not running as Administrator. Some features may not work (Esc to dismiss)".to_string());
+            }
+        }
+    }
+
+    // Check packet capture availability early (Windows needs Npcap)
+    if let Err(error_message) = process::check_packet_capture_available() {
+        eprintln!("{}", error_message);
+        exit(1);
+    }
+
     // Handle reset flag first
     if cli.reset {
         match reset_config() {
@@ -218,7 +298,7 @@ async fn main() -> Result<(), io::Error> {
     }
 
     // Check if no arguments were provided - run interactive mode
-    let (iface, json_mode, containers_mode, show_total_columns) = if cli.iface.is_none() && !cli.json && !cli.containers {
+    let (iface, json_mode, mut containers_mode, show_total_columns) = if cli.iface.is_none() && !cli.json && !cli.containers {
         // No arguments provided, run interactive mode
         match run_interactive_mode()? {
             Some(config) => (config.interface, config.json_mode, config.containers_mode, config.show_total_columns),
@@ -235,6 +315,9 @@ async fn main() -> Result<(), io::Error> {
         show_interface_help();
         return Ok(());
     };
+
+    // Apply Windows-specific override (disable container awareness)
+    let containers_mode_effective = if cfg!(windows) { false } else { containers_mode };
 
     // Now proceed with the monitoring logic using the determined configuration
     let (tx, mut rx) = mpsc::channel(100);
@@ -271,7 +354,7 @@ async fn main() -> Result<(), io::Error> {
         let mut last_map_refresh = Instant::now();
         let mut last_send = Instant::now();
         let mut last_rate_calc = Instant::now();
-        let (mut inode_map, mut conn_map) = refresh_proc_maps(containers_mode);
+        let (mut inode_map, mut conn_map) = refresh_proc_maps(containers_mode_effective);
         
         let capture_start = Instant::now();
 
@@ -284,7 +367,7 @@ async fn main() -> Result<(), io::Error> {
 
             // Refresh process maps every 2 seconds
             if last_map_refresh.elapsed() > Duration::from_secs(2) {
-                (inode_map, conn_map) = refresh_proc_maps(containers_mode);
+                (inode_map, conn_map) = refresh_proc_maps(containers_mode_effective);
                 last_map_refresh = Instant::now();
             }
 
@@ -369,15 +452,26 @@ async fn main() -> Result<(), io::Error> {
                 last_rate_calc = Instant::now();
             }
 
-            if !json_mode && last_send.elapsed() > Duration::from_secs(1) {
-                let _ = tx.blocking_send(bandwidth_map.clone());
-                last_send = Instant::now();
+            // Send data to the UI thread more frequently for a smoother experience
+            if !json_mode && last_send.elapsed() > Duration::from_millis(100) {
+                match tx.try_send(bandwidth_map.clone()) {
+                    Ok(_) => {
+                        last_send = Instant::now();
+                    }
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                        // Channel full – drop the update, UI will catch up and we send a fresh snapshot later
+                    }
+                    Err(_) => {
+                        // Receiver gone; exit capture loop
+                        break;
+                    }
+                }
             }
         }
     });
 
     if json_mode {
-        display_startup_info(&iface, true, containers_mode);
+        display_startup_info(&iface, true, containers_mode_effective);
         
         if let Some(final_stats) = rx.recv().await {
             // Convert to formatted version for JSON output
@@ -391,191 +485,185 @@ async fn main() -> Result<(), io::Error> {
             }
         }
     } else {
-        display_startup_info(&iface, false, containers_mode);
+        display_startup_info(&iface, false, containers_mode_effective);
         
         // Small delay to let user read the information
-        std::thread::sleep(std::time::Duration::from_millis(2000));
+        std::thread::sleep(std::time::Duration::from_millis(1500));
         
         // Start TUI
-        let mut app = App::new(containers_mode, show_total_columns);
+        let mut app = App::new(containers_mode_effective, show_total_columns);
+        if let Some(warning) = startup_warning.take() {
+            app.kill_notification = Some(warning);
+            app.kill_notification_time = Some(Instant::now());
+        }
         if let Some(saved_config) = load_config() {
             for alert in saved_config.alerts {
                 app.alerts.insert(alert.process_pid, alert);
             }
         }
-        let mut terminal = setup_terminal()?;
-        
+        let mut terminal = ui::setup_terminal()?;
+
+        let tick_rate = Duration::from_millis(100);
+        let mut last_tick = Instant::now();
+        let mut last_cleanup = Instant::now();
+
         loop {
-            if let Ok(new_stats) = rx.try_recv() {
-                // Accumulate new data instead of replacing, but filter out killed and dead processes
-                for (pid, new_info) in new_stats {
-                    // Use comprehensive validation to check if we should track this process
-                    if !should_track_process(pid, &app.killed_processes, &app.dead_processes_cache) {
-                        continue;
-                    }
-                    
-                    let has_alert = app.alerts.contains_key(&pid);
-                    let stats = app.stats.entry(pid).or_insert(ProcessInfo {
-                        name: new_info.name.clone(),
-                        sent: 0,
-                        received: 0,
-                        sent_rate: 0,
-                        received_rate: 0,
-                        container_name: new_info.container_name.clone(),
-                        user_name: new_info.user_name.clone(),
-                        has_alert,
-                        sent_history: Vec::new(),
-                        received_history: Vec::new(),
-                    });
-                    stats.sent = new_info.sent;
-                    stats.received = new_info.received;
-                    stats.sent_rate = new_info.sent_rate;
-                    stats.received_rate = new_info.received_rate;
-                    stats.name = new_info.name;
-                    stats.container_name = new_info.container_name;
-                    stats.user_name = new_info.user_name;
-                    stats.has_alert = has_alert;
+            // --- Draw UI ---
+            ui::render_ui(&app, &mut terminal)?;
 
-                    let now = app.start_time.elapsed().as_secs_f64();
-                    stats.sent_history.push((now, new_info.sent_rate as f64));
-                    stats.received_history.push((now, new_info.received_rate as f64));
+            // --- Input Handling ---
+            let timeout = tick_rate
+                .checked_sub(last_tick.elapsed())
+                .unwrap_or_else(|| Duration::from_secs(0));
 
-                    // Retain only the last 10 minutes of history to avoid unbounded growth
-                    let cutoff = now - 600.0; // 600s = 10 min
-                    stats.sent_history.retain(|(t, _)| *t >= cutoff);
-                    stats.received_history.retain(|(t, _)| *t >= cutoff);
-                    
-
-
-                    // Update system-wide bandwidth history (moved outside the loop for efficiency)
-                }
-                
-                // Update system-wide bandwidth history once per batch
-                let now = app.start_time.elapsed().as_secs_f64();
-                let cutoff = now - 600.0; // 600s = 10 min
-                
-                let current_system_snapshot: Vec<(i32, f64, f64)> = app.stats.iter()
-                    .map(|(pid, info)| (*pid, info.sent_rate as f64, info.received_rate as f64))
-                    .collect();
-                app.system_bandwidth_history.push((now, current_system_snapshot));
-                
-                // Retain only last 10 minutes of system history
-                app.system_bandwidth_history.retain(|(t, _)| *t >= cutoff);
-
-                // Update chart datasets for stacked view (only when needed)
-                if app.bandwidth_mode && app.chart_type == ChartType::SystemStacked {
-                    update_chart_datasets(&mut app);
-                }
-                
-                // Remove killed processes from the stats entirely
-                app.stats.retain(|pid, _| !app.killed_processes.contains(pid));
-                
-                // Update system overview statistics
-                app.update_system_stats();
-            }
-
-            // Check for triggered alerts (with cooldown)
-            let mut processes_to_kill = Vec::new();
-            let now = Instant::now();
-            const COOLDOWN_DURATION: Duration = Duration::from_secs(60); // 1 minute cooldown
-            
-            for (pid, alert) in &app.alerts {
-                if let Some(stats) = app.stats.get(pid) {
-                    if stats.sent + stats.received > alert.threshold_bytes {
-                        // Check if alert is in cooldown
-                        let should_trigger = match app.alert_cooldowns.get(pid) {
-                            Some(last_trigger) => now.duration_since(*last_trigger) >= COOLDOWN_DURATION,
-                            None => true, // First time triggering
-                        };
-                        
-                        if should_trigger {
-                            // For custom commands, add execution log entry immediately before execution
-                            if let AlertAction::CustomCommand(cmd) = &alert.action {
-                                let total_usage = stats.sent + stats.received;
-                                let execution_log_entry = format!(
-                                    "Command execution for {} (PID {}):\n{} | Usage: {} ({}% over threshold)",
-                                    &stats.name, *pid, cmd, format_bytes(total_usage),
-                                    ((total_usage as f64 / alert.threshold_bytes as f64 - 1.0) * 100.0) as u32
-                                );
-                                app.command_execution_log.push((now, execution_log_entry));
-                                // Keep only the last 50 log entries to prevent unbounded growth
-                                if app.command_execution_log.len() > 50 {
-                                    app.command_execution_log.remove(0);
-                                }
-                            }
-                            
-                            let (was_killed, message, _) = execute_alert_action(&alert.action, *pid, &stats.name, stats.sent, stats.received, alert.threshold_bytes);
-                            if was_killed {
-                                processes_to_kill.push(*pid);
-                            }
-                            app.last_alert_message = message;
-                            if app.last_alert_message.is_some() {
-                                app.last_alert_message_time = Some(now);
-                            }
-                            
-                            // Set cooldown
-                            app.alert_cooldowns.insert(*pid, now);
+            if crossterm::event::poll(timeout)? {
+                if let Event::Key(event) = event::read()? {
+                    if event.kind == crossterm::event::KeyEventKind::Press {
+                        if ui::input::handle_key_event(&mut app, event.code) {
+                            break; // Exit condition
                         }
                     }
                 }
             }
             
-            // Mark killed processes and remove their cooldowns
-            for pid in processes_to_kill {
-                app.killed_processes.insert(pid);
-                app.alert_cooldowns.remove(&pid);
-            }
-            
-            // Auto-dismiss alert messages after 5 seconds
-            if let Some(message_time) = app.last_alert_message_time {
-                if now.duration_since(message_time) >= Duration::from_secs(5) {
-                    app.last_alert_message = None;
-                    app.last_alert_message_time = None;
+            // --- Tick-based updates ---
+            if last_tick.elapsed() >= tick_rate {
+                // Drain all pending messages and only keep the most recent to avoid backlog lag
+                let mut latest_stats = None;
+                while let Ok(stats) = rx.try_recv() {
+                    latest_stats = Some(stats);
                 }
-            }
-            
-            // Periodic cleanup of dead processes
-            let should_cleanup = match app.last_cleanup_time {
-                Some(last_cleanup) => now.duration_since(last_cleanup) >= Duration::from_secs(PROCESS_CLEANUP_INTERVAL_SECS),
-                None => true, // First time, always cleanup
-            };
-            
-            if should_cleanup {
-                let removed_pids = cleanup_dead_processes(&mut app.stats, &app.killed_processes);
-                if !removed_pids.is_empty() {
-                    // Also remove alerts and cooldowns for dead processes
-                    for pid in &removed_pids {
-                        app.alerts.remove(pid);
-                        app.alert_cooldowns.remove(pid);
-                    }
-                    
-                    // Update dead processes cache to prevent re-adding
-                    app.dead_processes_cache.extend(&removed_pids);
-                    
-                    // Process cleanup now operates silently - no user notifications
-                }
-                app.last_cleanup_time = Some(now);
-                
-                // Periodically clear the dead processes cache to allow detection of reused PIDs
-                if app.dead_processes_cache.len() > 100 {
-                    app.dead_processes_cache.clear();
-                }
-            }
-            
-            render_ui(&app, &mut terminal)?;
 
-            if event::poll(Duration::from_millis(100))? {
-                if let Event::Key(key) = event::read()? {
-                    if handle_key_event(&mut app, key.code) {
-                        break; // User pressed 'q'
+                if let Some(new_stats) = latest_stats {
+                    let now = app.start_time.elapsed().as_secs_f64();
+                    for (pid, new_info) in new_stats {
+                        // Ignore stats for processes that are known to be killed or dead
+                        if !process::should_track_process(pid, &app.killed_processes, &app.dead_processes_cache) {
+                            continue;
+                        }
+                        let entry = app.stats.entry(pid).or_insert_with(|| {
+                            // If process is new, create a new ProcessInfo for it
+                            let mut pi = new_info.clone();
+                            // Allocate enough space for ~5 minutes of data with 100 ms samples (≈3 000 points)
+                            pi.sent_history = Vec::with_capacity(3_100);
+                            pi.received_history = Vec::with_capacity(3_100);
+                            pi
+                        });
+
+                        // Update stats from the capture thread
+                        entry.sent = new_info.sent;
+                        entry.received = new_info.received;
+                        entry.sent_rate = new_info.sent_rate;
+                        entry.received_rate = new_info.received_rate;
+                        entry.name = new_info.name;
+
+                        // Update the per-process history for the chart
+                        entry.sent_history.push((now, new_info.sent_rate as f64));
+                        entry.received_history.push((now, new_info.received_rate as f64));
+
+                        // Trim history vectors to prevent them from growing indefinitely
+                        // Keep at most ~5 minutes (≈3 000 points) of history to match the chart window
+                        if entry.sent_history.len() > 3_000 {
+                            entry.sent_history.remove(0);
+                        }
+                        if entry.received_history.len() > 3_000 {
+                            entry.received_history.remove(0);
+                        }
                     }
                 }
+
+                // Update data for other UI components that depend on the new stats
+                app.update_system_stats();
+                let now = app.start_time.elapsed().as_secs_f64();
+                let rates: Vec<(i32, f64, f64)> = app.stats.iter()
+                    .map(|(pid, info)| (*pid, info.sent_rate as f64, info.received_rate as f64))
+                    .collect();
+                app.system_bandwidth_history.push((now, rates));
+                // Cap system-wide history to ~5 minutes, too (3 000 × 100 ms)
+                if app.system_bandwidth_history.len() > 3_000 {
+                    app.system_bandwidth_history.remove(0);
+                }
+                ui::update_chart_datasets(&mut app);
+
+                // Cleanup alerts that have been displayed for more than 5 seconds
+                if let Some(time) = app.last_alert_message_time {
+                    if time.elapsed() > Duration::from_secs(5) {
+                        app.last_alert_message = None;
+                        app.last_alert_message_time = None;
+                    }
+                }
+
+                // Cleanup kill notifications that have been displayed for more than 5 seconds
+                if let Some(time) = app.kill_notification_time {
+                    if time.elapsed() > Duration::from_secs(5) {
+                        app.kill_notification = None;
+                        app.kill_notification_time = None;
+                    }
+                }
+
+                // Check for triggered alerts
+                let mut triggered_alerts = Vec::new();
+                for (pid, alert) in &app.alerts {
+                    if let Some(stats) = app.stats.get(pid) {
+                        let total_usage = stats.sent + stats.received;
+                        if total_usage > alert.threshold_bytes {
+                            // Check cooldown
+                            let should_trigger = if let Some(last_triggered) = app.alert_cooldowns.get(pid) {
+                                last_triggered.elapsed() > Duration::from_secs(60) // 1 minute cooldown
+                            } else {
+                                true
+                            };
+
+                            if should_trigger {
+                                triggered_alerts.push((*pid, alert.clone()));
+                                app.alert_cooldowns.insert(*pid, Instant::now());
+                            }
+                        }
+                    }
+                }
+                
+                for (pid, alert) in triggered_alerts {
+                    if let Some(stats) = app.stats.get(&pid) {
+                        let (was_killed, message, execution_log) = execute_alert_action(
+                            &alert.action, pid, &stats.name, stats.sent, stats.received, alert.threshold_bytes
+                        );
+                        
+                        if let Some(msg) = message {
+                            app.last_alert_message = Some(msg);
+                            app.last_alert_message_time = Some(Instant::now());
+                        }
+                        if let Some(log_entry) = execution_log {
+                            app.command_execution_log.push_front((Instant::now(), log_entry));
+                            if app.command_execution_log.len() > 10 {
+                                app.command_execution_log.pop_back();
+                            }
+                        }
+
+                        if was_killed {
+                            app.killed_processes.insert(pid);
+                            app.stats.remove(&pid);
+                        }
+                    }
+                }
+
+                // Periodic cleanup of dead processes
+                if last_cleanup.elapsed() >= Duration::from_secs(PROCESS_CLEANUP_INTERVAL_SECS) {
+                    let removed_pids = cleanup_dead_processes(&mut app.stats, &app.killed_processes);
+                    for pid in removed_pids {
+                        app.dead_processes_cache.insert(pid);
+                        if app.selected_process == Some(pid) {
+                            app.selected_process = None;
+                        }
+                    }
+                    last_cleanup = Instant::now();
+                }
+
+                last_tick = Instant::now();
             }
         }
         
-        restore_terminal(&mut terminal)?;
+        ui::restore_terminal(&mut terminal)?;
     }
-
     Ok(())
 }
 

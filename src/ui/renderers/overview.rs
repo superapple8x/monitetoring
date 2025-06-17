@@ -127,38 +127,40 @@ fn render_protocol_chart(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     let (_, _, total_sent_rate, total_received_rate) = app.totals();
     let total_rate = total_sent_rate + total_received_rate;
     
-    let max_protocol_rate = if total_rate > 0 {
-        [
-            app.system_stats.tcp_rate,
-            app.system_stats.udp_rate,
-            app.system_stats.icmp_rate,
-            app.system_stats.other_rate,
-        ].iter().max().copied().unwrap_or(1)
+    // Use current rates if non-zero, otherwise fall back to last non-zero rates for display persistence
+    let (display_tcp, display_udp, display_icmp, display_other) = if total_rate > 0 {
+        (app.system_stats.tcp_rate, app.system_stats.udp_rate, 
+         app.system_stats.icmp_rate, app.system_stats.other_rate)
     } else {
-        1
+        // Use last non-zero rates with reduced opacity to indicate they're historical
+        (app.last_nonzero_system_stats.tcp_rate / 4, app.last_nonzero_system_stats.udp_rate / 4,
+         app.last_nonzero_system_stats.icmp_rate / 4, app.last_nonzero_system_stats.other_rate / 4)
     };
+    
+    let max_protocol_rate = [display_tcp, display_udp, display_icmp, display_other]
+        .iter().max().copied().unwrap_or(1).max(1); // Ensure minimum of 1 for scaling
     
     let bars: Vec<Bar<'_>> = vec![
         Bar::default()
-            .value(app.system_stats.tcp_rate)
+            .value(display_tcp)
             .label("TCP".into())
             .text_value(String::new()) // hide numeric value
-            .style(Style::default().fg(Color::Red)),
+            .style(Style::default().fg(if total_rate > 0 { Color::Red } else { Color::DarkGray })),
         Bar::default()
-            .value(app.system_stats.udp_rate)
+            .value(display_udp)
             .label("UDP".into())
             .text_value(String::new())
-            .style(Style::default().fg(Color::Green)),
+            .style(Style::default().fg(if total_rate > 0 { Color::Green } else { Color::DarkGray })),
         Bar::default()
-            .value(app.system_stats.icmp_rate)
+            .value(display_icmp)
             .label("ICMP".into())
             .text_value(String::new())
-            .style(Style::default().fg(Color::Yellow)),
+            .style(Style::default().fg(if total_rate > 0 { Color::Yellow } else { Color::DarkGray })),
         Bar::default()
-            .value(app.system_stats.other_rate)
+            .value(display_other)
             .label("Other".into())
             .text_value(String::new())
-            .style(Style::default().fg(Color::Magenta)),
+            .style(Style::default().fg(if total_rate > 0 { Color::Magenta } else { Color::DarkGray })),
     ];
 
     let bar_group = BarGroup::default().bars(&bars);
@@ -178,30 +180,41 @@ fn render_protocol_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     let (_, _, total_sent_rate, total_received_rate) = app.totals();
     let total_rate = total_sent_rate + total_received_rate;
     
+    // Use current rates if non-zero, otherwise fall back to last non-zero rates for display persistence
+    let (display_tcp, display_udp, display_icmp, display_other) = if total_rate > 0 {
+        (app.system_stats.tcp_rate, app.system_stats.udp_rate, 
+         app.system_stats.icmp_rate, app.system_stats.other_rate)
+    } else {
+        (app.last_nonzero_system_stats.tcp_rate, app.last_nonzero_system_stats.udp_rate,
+         app.last_nonzero_system_stats.icmp_rate, app.last_nonzero_system_stats.other_rate)
+    };
+    
+    let display_total = display_tcp + display_udp + display_icmp + display_other;
+    
     let protocol_rows: Vec<Row> = vec![
         Row::new(vec![
-            Cell::from(Span::styled("■ TCP", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))),
-            Cell::from(format_bytes(app.system_stats.tcp_rate)),
+            Cell::from(Span::styled("■ TCP", Style::default().fg(if total_rate > 0 { Color::Red } else { Color::DarkGray }).add_modifier(Modifier::BOLD))),
+            Cell::from(format_bytes(display_tcp)),
             Cell::from(app.system_stats.tcp_packets.to_string()),
-            Cell::from(format!("{:.1}%", if total_rate > 0 { (app.system_stats.tcp_rate as f64 / total_rate as f64) * 100.0 } else { 0.0 })),
+            Cell::from(format!("{:.1}%", if display_total > 0 { (display_tcp as f64 / display_total as f64) * 100.0 } else { 0.0 })),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("■ UDP", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))),
-            Cell::from(format_bytes(app.system_stats.udp_rate)),
+            Cell::from(Span::styled("■ UDP", Style::default().fg(if total_rate > 0 { Color::Green } else { Color::DarkGray }).add_modifier(Modifier::BOLD))),
+            Cell::from(format_bytes(display_udp)),
             Cell::from(app.system_stats.udp_packets.to_string()),
-            Cell::from(format!("{:.1}%", if total_rate > 0 { (app.system_stats.udp_rate as f64 / total_rate as f64) * 100.0 } else { 0.0 })),
+            Cell::from(format!("{:.1}%", if display_total > 0 { (display_udp as f64 / display_total as f64) * 100.0 } else { 0.0 })),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("■ ICMP", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))),
-            Cell::from(format_bytes(app.system_stats.icmp_rate)),
+            Cell::from(Span::styled("■ ICMP", Style::default().fg(if total_rate > 0 { Color::Yellow } else { Color::DarkGray }).add_modifier(Modifier::BOLD))),
+            Cell::from(format_bytes(display_icmp)),
             Cell::from(app.system_stats.icmp_packets.to_string()),
-            Cell::from(format!("{:.1}%", if total_rate > 0 { (app.system_stats.icmp_rate as f64 / total_rate as f64) * 100.0 } else { 0.0 })),
+            Cell::from(format!("{:.1}%", if display_total > 0 { (display_icmp as f64 / display_total as f64) * 100.0 } else { 0.0 })),
         ]),
         Row::new(vec![
-            Cell::from(Span::styled("■ Other", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD))),
-            Cell::from(format_bytes(app.system_stats.other_rate)),
+            Cell::from(Span::styled("■ Other", Style::default().fg(if total_rate > 0 { Color::Magenta } else { Color::DarkGray }).add_modifier(Modifier::BOLD))),
+            Cell::from(format_bytes(display_other)),
             Cell::from(app.system_stats.other_packets.to_string()),
-            Cell::from(format!("{:.1}%", if total_rate > 0 { (app.system_stats.other_rate as f64 / total_rate as f64) * 100.0 } else { 0.0 })),
+            Cell::from(format!("{:.1}%", if display_total > 0 { (display_other as f64 / display_total as f64) * 100.0 } else { 0.0 })),
         ]),
     ];
 

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 use ratatui::style::Color;
 
@@ -152,13 +152,15 @@ pub struct App {
     pub alert_cooldowns: HashMap<i32, Instant>,
     pub last_alert_message: Option<String>,
     pub last_alert_message_time: Option<Instant>, // Track when the alert message was set
+    pub kill_notification: Option<String>, // Kill success notification
+    pub kill_notification_time: Option<Instant>, // When kill notification was set
     pub dead_processes_cache: HashSet<i32>, // Cache of known dead processes to avoid re-checking
-    pub command_execution_log: Vec<(Instant, String)>, // Timestamped execution log
+    pub command_execution_log: VecDeque<(Instant, String)>, // Timestamped execution log
     pub bandwidth_mode: bool,
     pub system_bandwidth_history: Vec<(f64, Vec<(i32, f64, f64)>)>, // (timestamp, [(pid, sent_rate, received_rate)])
     pub chart_type: ChartType,
     pub chart_datasets: Vec<(String, Vec<(f64, f64)>, ratatui::style::Color)>,
-    pub process_colors: HashMap<String, Color>,
+    pub process_colors: HashMap<i32, Color>,
     pub metrics_mode: MetricsMode,
     // System Overview Dashboard fields
     pub system_stats: SystemStats,
@@ -171,6 +173,9 @@ pub struct App {
     // Performance optimization
     pub last_chart_update: Instant, // Last time chart datasets were updated
     pub last_cleanup_time: Option<Instant>, // Last time processes were cleaned up
+    // Chart persistence fields
+    pub process_last_active: HashMap<i32, Instant>, // Track when each process last had non-zero traffic
+    pub last_nonzero_system_stats: SystemStats, // Keep last non-zero system stats for display
 }
 
 impl App {
@@ -195,8 +200,10 @@ impl App {
             alert_cooldowns: HashMap::new(),
             last_alert_message: None,
             last_alert_message_time: None, // Track when the alert message was set
+            kill_notification: None, // Kill success notification
+            kill_notification_time: None, // When kill notification was set
             dead_processes_cache: HashSet::new(), // Cache of known dead processes to avoid re-checking
-            command_execution_log: Vec::new(),
+            command_execution_log: VecDeque::new(),
             bandwidth_mode: false,
             system_bandwidth_history: Vec::new(),
             chart_type: ChartType::ProcessLines,
@@ -214,6 +221,9 @@ impl App {
             // Performance optimization
             last_chart_update: Instant::now(),
             last_cleanup_time: None,
+            // Chart persistence fields
+            process_last_active: HashMap::new(),
+            last_nonzero_system_stats: SystemStats::new(),
         }
     }
 
@@ -284,6 +294,13 @@ impl App {
             self.system_stats.udp_packets += (total_bytes as f64 * 0.15 / 512.0) as u64;
             self.system_stats.icmp_packets += (total_bytes as f64 * 0.01 / 64.0) as u64;
             self.system_stats.other_packets += (total_bytes as f64 * 0.04 / 800.0) as u64;
+        }
+        
+        // Update last non-zero system stats for display persistence
+        let total_current_rate = self.system_stats.tcp_rate + self.system_stats.udp_rate + 
+                                self.system_stats.icmp_rate + self.system_stats.other_rate;
+        if total_current_rate > 0 {
+            self.last_nonzero_system_stats = self.system_stats.clone();
         }
         
         // Check if quota threshold is exceeded and update system alerts

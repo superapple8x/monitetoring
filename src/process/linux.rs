@@ -1,6 +1,11 @@
 use std::collections::HashMap;
 use crate::types::{Connection, ProcessIdentifier, ProcessInfo};
 
+/// Check if packet capture is available (always available on Linux)
+pub fn check_packet_capture_available() -> Result<(), String> {
+    Ok(()) // Linux has built-in packet capture support
+}
+
 pub fn extract_container_name(pid: i32) -> Option<String> {
     // Read /proc/[PID]/cgroup to extract container information
     let cgroup_path = format!("/proc/{}/cgroup", pid);

@@ -1,14 +1,21 @@
 # Monitetoring
 
-A real-time per-process network bandwidth monitoring tool for Linux, inspired by `nethogs`. Built with Rust and featuring a terminal UI powered by `ratatui`.
+A real-time per-process network bandwidth monitoring tool for Linux and Windows, inspired by `nethogs`. Built with Rust and featuring a terminal UI powered by `ratatui`.
 
 ## Installation
 
 ### Prerequisites
 
+#### Linux
 - Linux system (kernel 2.6+ recommended)
 - Rust tool-chain (stable)
 - Root/sudo privileges (required for packet capture)
+
+#### Windows  
+- Windows 10/11
+- Rust tool-chain (stable)
+- [Npcap](https://npcap.com/) or WinPcap installed
+- Administrator privileges (required for packet capture)
 
 ### Installing Rust
 
@@ -31,17 +38,31 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 source "$HOME/.cargo/env"
 ```
 
-After installation re-open your terminal or run `source $HOME/.cargo/env` so that `cargo` is available in your `PATH`.
+#### Windows
+
+1. Download and install Rust from [rustup.rs](https://rustup.rs/)
+2. Install [Npcap](https://npcap.com/) (recommended) or WinPcap for packet capture support
+3. Open PowerShell or Command Prompt as Administrator
+
+After installation re-open your terminal or run `source $HOME/.cargo/env` (Linux/macOS) so that `cargo` is available in your `PATH`.
 
 ### Quick Install (Recommended)
 
 Once you have Rust installed, the easiest way to install monitetoring is via cargo:
 
+#### Linux/macOS
 ```bash
 cargo install monitetoring
 ```
 
+#### Windows
+```cmd
+cargo install monitetoring
+```
+
 This will download, compile, and install the latest version from [crates.io](https://crates.io/crates/monitetoring).
+
+**Note for Windows users**: Make sure to run the application as Administrator for packet capture to work properly.
 
 ### Alternative Installation Methods
 

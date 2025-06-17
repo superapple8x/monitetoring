@@ -13,7 +13,6 @@ categories = ["command-line-utilities", "network-programming"]
 [dependencies]
 pcap = "2.2.0"
 etherparse = "0.14.0"
-procfs = "0.16.0"
 clap = { version = "4.5.4", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 crossterm = "0.27"
@@ -21,8 +20,18 @@ ratatui = "0.26"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 dirs = "5.0"
-nix = { version = "0.28.0", features = ["signal"] }
 chrono = { version = "0.4", features = ["serde"] }
+
+# Linux-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = "0.16.0"
+nix = { version = "0.28.0", features = ["signal"] }
+libc = "0.2"
+
+# Windows-specific dependencies
+[target.'cfg(target_os = "windows")'.dependencies]
+netstat2 = "0.11"
+sysinfo = "0.30"
 
 # Optimization profiles
 [profile.release]
