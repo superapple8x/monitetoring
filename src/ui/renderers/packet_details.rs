@@ -6,6 +6,10 @@ use crate::types::{App, PacketDirection, PacketSortColumn, PacketSortDirection, 
 const NARROW_TERMINAL_THRESHOLD: u16 = 80;
 const WIDE_TERMINAL_THRESHOLD: u16 = 120;
 
+/// Thresholds for visual highlights
+const LARGE_PACKET_THRESHOLD_BYTES: usize = 100_000; // Highlight packets larger than 100 KB
+const FREQUENT_CONNECTION_THRESHOLD: usize = 20;     // Highlight connections with > 20 packets in current viewport
+
 /// Common port to service name mappings for better readability
 fn get_port_name(port: u16) -> Option<&'static str> {
     match port {
@@ -287,13 +291,13 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     let end_idx = (scroll_offset + visible_height).min(filtered_count);
 
-    // Build rows with responsive layout
+    // Build rows with responsive layout (narrow / medium / wide)
     let (rows, header, constraints) = build_responsive_table_data(
-        app, 
-        process_info, 
-        scroll_offset, 
-        end_idx, 
-        terminal_width
+        app,
+        process_info,
+        scroll_offset,
+        end_idx,
+        terminal_width,
     );
 
     // Create table title with packet count information
@@ -389,46 +393,70 @@ fn build_narrow_layout<'a>(
         None
     };
     
-    let rows: Vec<Row> = app.packet_cache[scroll_offset..end_idx]
-        .iter()
-        .enumerate()
-        .map(|(i, &packet_idx)| {
-            let p = &process_info.packet_history[packet_idx];
-            let global_idx = scroll_offset + i;
-            
-            // Use relative timestamps for narrow terminals to save space
-            let timestamp = format_relative_timestamp(p.timestamp, base_time, true);
-            
-            // Combine direction and protocol with color coding
-            let proto_dir = match p.direction {
-                PacketDirection::Sent => format!("↑{}", p.cached_proto),
-                PacketDirection::Received => format!("↓{}", p.cached_proto),
-            };
-            
-            // Enhanced connection display with smart formatting
-            let connection = format_connection_enhanced(
-                &p.src_ip.to_string(), p.src_port,
-                &p.dst_ip.to_string(), p.dst_port,
-                p.direction
-            );
-            
-            // Alternate row colors for better readability
-            let mut style = if global_idx % 2 == 0 {
-                Style::default()
-            } else {
-                Style::default().bg(Color::DarkGray)
-            };
-            
-            // Add protocol-based color to the protocol+direction column
-            let proto_color = get_protocol_color(&p.cached_proto);
+    // Build frequency map for connection counts within the visible slice
+    let slice = &app.packet_cache[scroll_offset..end_idx];
+    let mut conn_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for &packet_idx in slice {
+        let p = &process_info.packet_history[packet_idx];
+        let key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
+        *conn_counts.entry(key).or_insert(0) += 1;
+    }
+    
+    let mut rows: Vec<Row> = Vec::with_capacity(slice.len());
+    let mut last_conn_key: Option<String> = None;
+    let mut bg_toggle = false;
+    
+    for &packet_idx in slice {
+        let p = &process_info.packet_history[packet_idx];
+        let conn_key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
+        if last_conn_key.as_ref().map(|k| k != &conn_key).unwrap_or(true) {
+            bg_toggle = !bg_toggle;
+            last_conn_key = Some(conn_key.clone());
+        }
+        
+        let row_style = if bg_toggle { Style::default() } else { Style::default().bg(Color::DarkGray) };
+        
+        // Timestamp (potentially truncated already outside loop)
+        let timestamp = format_relative_timestamp(p.timestamp, base_time, true);
+        
+        // Direction + protocol combined string e.g., ↑TCP
+        let proto_dir_str = match p.direction {
+            PacketDirection::Sent => format!("↑{}", p.cached_proto),
+            PacketDirection::Received => format!("↓{}", p.cached_proto),
+        };
+        let proto_color = get_protocol_color(&p.cached_proto);
+        let proto_cell = Cell::from(Span::styled(proto_dir_str, Style::default().fg(proto_color).add_modifier(Modifier::BOLD)));
 
-            Row::new(vec![
-                Cell::from(timestamp),
-                Cell::from(Span::styled(proto_dir, Style::default().fg(proto_color).add_modifier(Modifier::BOLD))),
-                Cell::from(connection),
-                Cell::from(p.cached_size.clone()),
-            ]).style(style)
-        }).collect();
+        // Connection summary
+        let connection_summary = format_connection_enhanced(
+            &p.src_ip.to_string(),
+            p.src_port,
+            &p.dst_ip.to_string(),
+            p.dst_port,
+            p.direction,
+        );
+        let frequent = conn_counts.get(&conn_key).copied().unwrap_or(0) > FREQUENT_CONNECTION_THRESHOLD;
+        let connection_cell = if frequent {
+            Cell::from(Span::styled(connection_summary, Style::default().fg(Color::LightCyan)))
+        } else {
+            Cell::from(connection_summary)
+        };
+        
+        // Size cell highlight
+        let size_cell = if p.size > LARGE_PACKET_THRESHOLD_BYTES {
+            Cell::from(Span::styled(p.cached_size.clone(), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)))
+        } else {
+            Cell::from(p.cached_size.clone())
+        };
+        
+        let row = Row::new(vec![
+            Cell::from(timestamp),
+            proto_cell,
+            connection_cell,
+            size_cell,
+        ]).style(row_style);
+        rows.push(row);
+    }
 
     // Compact headers for narrow terminals
     let header = Row::new(vec![
@@ -468,56 +496,53 @@ fn build_medium_layout<'a>(
     end_idx: usize,
 ) -> (Vec<Row<'a>>, Row<'a>, Vec<Constraint>) {
     
-    let rows: Vec<Row> = app.packet_cache[scroll_offset..end_idx]
-        .iter()
-        .enumerate()
-        .map(|(i, &packet_idx)| {
-            let p = &process_info.packet_history[packet_idx];
-            let global_idx = scroll_offset + i;
-            
-            // Use absolute timestamps but shorter format for medium terminals
-            let timestamp = if p.cached_ts.len() > 12 {
-                &p.cached_ts[..12]  // Truncate milliseconds if too long
-            } else {
-                &p.cached_ts
-            };
-            
-            let dir_str = match p.direction {
-                PacketDirection::Sent => "↑",
-                PacketDirection::Received => "↓",
-            };
-            
-            // Enhanced source and destination with service names
-            let enhanced_src = format_endpoint_smart(
-                &p.src_ip.to_string(), 
-                p.src_port, 
-                p.src_ip.to_string().starts_with("127.0.0.1") || p.src_ip.to_string().starts_with("::1")
-            );
-            let enhanced_dst = format_endpoint_smart(
-                &p.dst_ip.to_string(), 
-                p.dst_port, 
-                p.dst_ip.to_string().starts_with("127.0.0.1") || p.dst_ip.to_string().starts_with("::1")
-            );
+    // Build frequency map & rows with enhanced visual hierarchy
+    let slice = &app.packet_cache[scroll_offset..end_idx];
+    let mut conn_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for &packet_idx in slice {
+        let pkt = &process_info.packet_history[packet_idx];
+        let key = format!("{}:{}-{}:{}-{}", pkt.src_ip, pkt.src_port, pkt.dst_ip, pkt.dst_port, pkt.protocol);
+        *conn_counts.entry(key).or_insert(0) += 1;
+    }
 
-            // Alternate row colors for better readability
-            let style = if global_idx % 2 == 0 {
-                Style::default()
-            } else {
-                Style::default().bg(Color::DarkGray)
-            };
-            
-            // Protocol color for better visual distinction
-            let proto_color = get_protocol_color(&p.cached_proto);
+    let mut rows: Vec<Row> = Vec::with_capacity(slice.len());
+    let mut last_conn_key: Option<String> = None;
+    let mut bg_toggle = false;
 
-            Row::new(vec![
-                Cell::from(timestamp.to_string()),
-                Cell::from(dir_str.to_string()),
-                Cell::from(Span::styled(p.cached_proto.clone(), Style::default().fg(proto_color).add_modifier(Modifier::BOLD))),
-                Cell::from(enhanced_src),
-                Cell::from(enhanced_dst),
-                Cell::from(p.cached_size.clone()),
-            ]).style(style)
-        }).collect();
+    for &packet_idx in slice {
+        let p = &process_info.packet_history[packet_idx];
+        let conn_key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
+        if last_conn_key.as_ref().map(|k| k != &conn_key).unwrap_or(true) {
+            bg_toggle = !bg_toggle;
+            last_conn_key = Some(conn_key.clone());
+        }
+
+        let row_style = if bg_toggle { Style::default() } else { Style::default().bg(Color::DarkGray) };
+
+        let timestamp = if p.cached_ts.len() > 12 { &p.cached_ts[..12] } else { &p.cached_ts };
+        let dir_str = match p.direction { PacketDirection::Sent => "↑", PacketDirection::Received => "↓" };
+        let proto_color = get_protocol_color(&p.cached_proto);
+        let proto_cell = Cell::from(Span::styled(p.cached_proto.clone(), Style::default().fg(proto_color).add_modifier(Modifier::BOLD)));
+
+        let enhanced_src = format_endpoint_smart(&p.src_ip.to_string(), p.src_port, p.src_ip.to_string().starts_with("127.0.0.1") || p.src_ip.to_string().starts_with("::1"));
+        let enhanced_dst = format_endpoint_smart(&p.dst_ip.to_string(), p.dst_port, p.dst_ip.to_string().starts_with("127.0.0.1") || p.dst_ip.to_string().starts_with("::1"));
+        let frequent = conn_counts.get(&conn_key).copied().unwrap_or(0) > FREQUENT_CONNECTION_THRESHOLD;
+        let src_cell = if frequent { Cell::from(Span::styled(enhanced_src, Style::default().fg(Color::LightCyan))) } else { Cell::from(enhanced_src) };
+        let dst_cell = if frequent { Cell::from(Span::styled(enhanced_dst, Style::default().fg(Color::LightCyan))) } else { Cell::from(enhanced_dst) };
+
+        let size_cell = if p.size > LARGE_PACKET_THRESHOLD_BYTES {
+            Cell::from(Span::styled(p.cached_size.clone(), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)))
+        } else { Cell::from(p.cached_size.clone()) };
+
+        rows.push(Row::new(vec![
+            Cell::from(timestamp),
+            Cell::from(dir_str.to_string()),
+            proto_cell,
+            src_cell,
+            dst_cell,
+            size_cell,
+        ]).style(row_style));
+    }
 
     // Current headers with improved spacing
     let header = Row::new(vec![
@@ -567,59 +592,55 @@ fn build_wide_layout<'a>(
     end_idx: usize,
 ) -> (Vec<Row<'a>>, Row<'a>, Vec<Constraint>) {
     
-    let rows: Vec<Row> = app.packet_cache[scroll_offset..end_idx]
-        .iter()
-        .enumerate()
-        .map(|(i, &packet_idx)| {
-            let p = &process_info.packet_history[packet_idx];
-            let global_idx = scroll_offset + i;
-            
-            // Full timestamp for wide terminals
-            let timestamp = &p.cached_ts;
-            
-            // Enhanced direction with visual indicators
-            let dir_str = match p.direction {
-                PacketDirection::Sent => "↑ OUT",
-                PacketDirection::Received => "↓ IN",
-            };
-            
-            // Enhanced endpoints with full service name resolution
-            let enhanced_src = format_endpoint_smart(
-                &p.src_ip.to_string(), 
-                p.src_port, 
-                p.src_ip.to_string().starts_with("127.0.0.1") || p.src_ip.to_string().starts_with("::1")
-            );
-            let enhanced_dst = format_endpoint_smart(
-                &p.dst_ip.to_string(), 
-                p.dst_port, 
-                p.dst_ip.to_string().starts_with("127.0.0.1") || p.dst_ip.to_string().starts_with("::1")
-            );
+    // Build rows with connection grouping & highlights
+    let slice = &app.packet_cache[scroll_offset..end_idx];
+    let mut conn_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for &idx in slice {
+        let p = &process_info.packet_history[idx];
+        let key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
+        *conn_counts.entry(key).or_insert(0) += 1;
+    }
 
-            // Alternate row colors for better readability with enhanced styling for sent/received
-            let mut style = if global_idx % 2 == 0 {
-                Style::default()
-            } else {
-                Style::default().bg(Color::DarkGray)
-            };
-            
-            // Add subtle background color based on direction for wide terminals
-            style = match p.direction {
-                PacketDirection::Sent => style.fg(Color::LightBlue),
-                PacketDirection::Received => style.fg(Color::LightGreen),
-            };
-            
-            // Protocol color for better visual distinction
-            let proto_color = get_protocol_color(&p.cached_proto);
+    let mut rows: Vec<Row> = Vec::with_capacity(slice.len());
+    let mut last_conn_key: Option<String> = None;
+    let mut bg_toggle = false;
 
-            Row::new(vec![
-                Cell::from(timestamp.clone()),
-                Cell::from(Span::styled(dir_str.to_string(), Style::default().add_modifier(Modifier::BOLD))),
-                Cell::from(Span::styled(p.cached_proto.clone(), Style::default().fg(proto_color).add_modifier(Modifier::BOLD))),
-                Cell::from(enhanced_src),
-                Cell::from(enhanced_dst),
-                Cell::from(p.cached_size.clone()),
-            ]).style(style)
-        }).collect();
+    for &packet_idx in slice {
+        let p = &process_info.packet_history[packet_idx];
+        let conn_key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
+        if last_conn_key.as_ref().map(|k| k != &conn_key).unwrap_or(true) {
+            bg_toggle = !bg_toggle;
+            last_conn_key = Some(conn_key.clone());
+        }
+
+        let mut style = if bg_toggle { Style::default() } else { Style::default().bg(Color::DarkGray) };
+        // direction tint
+        style = match p.direction { PacketDirection::Sent => style.fg(Color::LightBlue), PacketDirection::Received => style.fg(Color::LightGreen) };
+
+        let timestamp = p.cached_ts.as_str();
+        let dir_str = match p.direction { PacketDirection::Sent => "↑ OUT", PacketDirection::Received => "↓ IN" };
+        let proto_color = get_protocol_color(&p.cached_proto);
+
+        let enhanced_src = format_endpoint_smart(&p.src_ip.to_string(), p.src_port, p.src_ip.to_string().starts_with("127.0.0.1") || p.src_ip.to_string().starts_with("::1"));
+        let enhanced_dst = format_endpoint_smart(&p.dst_ip.to_string(), p.dst_port, p.dst_ip.to_string().starts_with("127.0.0.1") || p.dst_ip.to_string().starts_with("::1"));
+
+        let frequent = conn_counts.get(&conn_key).copied().unwrap_or(0) > FREQUENT_CONNECTION_THRESHOLD;
+        let src_cell = if frequent { Cell::from(Span::styled(enhanced_src, Style::default().fg(Color::LightCyan))) } else { Cell::from(enhanced_src) };
+        let dst_cell = if frequent { Cell::from(Span::styled(enhanced_dst, Style::default().fg(Color::LightCyan))) } else { Cell::from(enhanced_dst) };
+
+        let size_cell = if p.size > LARGE_PACKET_THRESHOLD_BYTES {
+            Cell::from(Span::styled(p.cached_size.clone(), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)))
+        } else { Cell::from(p.cached_size.clone()) };
+
+        rows.push(Row::new(vec![
+            Cell::from(timestamp),
+            Cell::from(Span::styled(dir_str.to_string(), Style::default().add_modifier(Modifier::BOLD))),
+            Cell::from(Span::styled(p.cached_proto.clone(), Style::default().fg(proto_color).add_modifier(Modifier::BOLD))),
+            src_cell,
+            dst_cell,
+            size_cell,
+        ]).style(style));
+    }
 
     // Enhanced headers for wide terminals
     let header = Row::new(vec![
@@ -684,8 +705,6 @@ fn get_combined_sort_indicator(app: &App, col1: PacketSortColumn, col2: PacketSo
         String::new()
     }
 }
-
-
 
 /// Export packets to CSV file
 pub fn export_packets_to_csv(app: &mut App, process_info: &crate::types::ProcessInfo, _pid: i32) -> Result<(), Box<dyn std::error::Error>> {
