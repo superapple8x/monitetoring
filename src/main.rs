@@ -631,7 +631,12 @@ async fn main() -> Result<(), io::Error> {
         
         loop {
             // --- Draw UI ---
-            ui::render_ui(&app, &mut terminal)?;
+            ui::render_ui(&mut app, &mut terminal)?;
+            
+            // Reset force redraw flag after rendering
+            if app.force_redraw {
+                app.force_redraw = false;
+            }
 
             // --- Input Handling ---
             let timeout = tick_rate
@@ -729,6 +734,23 @@ async fn main() -> Result<(), io::Error> {
                     if time.elapsed() > Duration::from_secs(5) {
                         app.settings_notification = None;
                         app.settings_notification_time = None;
+                    }
+                }
+
+                // Enhanced export notification cleanup with state management
+                if let Some(time) = app.export_notification_time {
+                    let elapsed = time.elapsed();
+                    if elapsed > Duration::from_secs(9) && elapsed <= Duration::from_secs(10) {
+                        // Transition to expiring state for smoother cleanup
+                        if app.export_notification_state != types::NotificationState::Expiring {
+                            app.export_notification_state = types::NotificationState::Expiring;
+                            app.force_redraw = true; // Force redraw on state transition
+                        }
+                    } else if elapsed > Duration::from_secs(10) {
+                        // Complete cleanup
+                        app.export_notification_state = types::NotificationState::None;
+                        app.export_notification_time = None;
+                        app.force_redraw = true; // Force redraw when clearing notification
                     }
                 }
 

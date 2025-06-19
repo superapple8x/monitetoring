@@ -5,21 +5,28 @@ use crate::types::{App, PacketDirection, PacketSortColumn, PacketSortDirection, 
 pub fn render(f: &mut Frame, app: &App) {
     let area = f.size();
 
-    // Split area for status line, search bar (if active), and table
-    let mut constraints = vec![
-        Constraint::Length(3), // Status/help line
-    ];
-    
-    if app.packet_search_mode {
-        constraints.push(Constraint::Length(3)); // Search input bar
-    }
-    
-    constraints.push(Constraint::Min(0)); // Main table
-    
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(constraints)
-        .split(area);
+    // FIXED FOOTER APPROACH: Always allocate space for export notification to prevent layout artifacts
+    // This eliminates the dynamic layout changes that cause UI artifacts
+    let chunks = if app.packet_search_mode {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Status/help line
+                Constraint::Length(3), // Search input bar
+                Constraint::Min(0),    // Main table
+                Constraint::Length(4), // Export notification (ALWAYS allocated)
+            ])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(3), // Status/help line
+                Constraint::Min(0),    // Main table
+                Constraint::Length(4), // Export notification (ALWAYS allocated)
+            ])
+            .split(area)
+    };
 
     let mut chunk_idx = 0;
 
@@ -143,24 +150,25 @@ pub fn render(f: &mut Frame, app: &App) {
         format!("Sort: {}{} | ", column_name, direction_arrow)
     };
 
+    // Simple header title without packet count (packet count goes to table header)
+    let header_title = format!("Packet Details - {} (PID {})", process_info.name, pid);
+
+    // Status line now focuses on controls and filtering info
     let status_text = if filtered_count == 0 {
         if total_packets == 0 {
-            "No packets captured yet. Network activity will appear here in real-time.".to_string()
+            "Network activity will appear here in real-time.".to_string()
         } else {
-            format!("No packets match current filter. {}Total: {} packets", filter_info, total_packets)
+            format!("{}No packets match current filter", filter_info)
         }
     } else {
-        let visible_start = app.packet_scroll_offset + 1;
-        let visible_end = (app.packet_scroll_offset + (chunks.last().unwrap().height.saturating_sub(3) as usize)).min(filtered_count);
-        format!("{}{}Showing {}-{} of {} packets | ↑↓:scroll 1-6:sort /:search e:export Esc:back", 
-                filter_info, sort_info, visible_start, visible_end, filtered_count)
+        format!("{}{}Controls: ↑↓:scroll 1-6:sort /:search e:export Esc:back", 
+                filter_info, sort_info)
     };
 
     let status = Paragraph::new(Line::from(vec![
         Span::styled(status_text, Style::default().fg(if filtered_count == 0 { Color::Yellow } else { Color::Cyan }))
     ]))
-    .block(Block::default().title(format!("Packet Details - {} (PID {})", 
-        process_info.name, pid)).borders(Borders::ALL));
+    .block(Block::default().title(header_title).borders(Borders::ALL));
     
     f.render_widget(status, chunks[chunk_idx]);
     chunk_idx += 1;
@@ -259,6 +267,19 @@ pub fn render(f: &mut Frame, app: &App) {
         )),
     ]);
 
+    // Create table title with packet count information
+    let table_title = if filtered_count == 0 {
+        if total_packets == 0 {
+            "Packets - No packets captured".to_string()
+        } else {
+            format!("Packets - No matches ({} total)", total_packets)
+        }
+    } else {
+        let visible_start = app.packet_scroll_offset + 1;
+        let visible_end = (app.packet_scroll_offset + visible_height).min(filtered_count);
+        format!("Packets - Showing {}-{} of {}", visible_start, visible_end, filtered_count)
+    };
+
     let table = Table::new(
         rows,
         &[
@@ -271,21 +292,58 @@ pub fn render(f: &mut Frame, app: &App) {
         ],
     )
     .header(header)
-    .block(Block::default().borders(Borders::ALL));
+    .block(Block::default().title(table_title).borders(Borders::ALL));
 
     f.render_widget(table, chunks[chunk_idx]);
+
+    // ALWAYS render the footer area (fixed space allocated) to prevent layout artifacts
+    let export_notification_index = if app.packet_search_mode { 3 } else { 2 };
+    
+    match &app.export_notification_state {
+        crate::types::NotificationState::Active(export_msg) => {
+            // Show export notification
+            let export_notification = Paragraph::new(export_msg.clone())
+                .style(Style::default().fg(Color::Green))
+                .block(Block::default()
+                    .title("Export Status")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Green)));
+            
+            f.render_widget(export_notification, chunks[export_notification_index]);
+        }
+        crate::types::NotificationState::Expiring => {
+            // Show fading notification during cleanup
+            let fading_notification = Paragraph::new("Notification clearing...")
+                .style(Style::default().fg(Color::DarkGray))
+                .block(Block::default().borders(Borders::NONE));
+            
+            f.render_widget(fading_notification, chunks[export_notification_index]);
+        }
+        crate::types::NotificationState::None => {
+            // Show empty footer space to maintain consistent layout
+            let empty_footer = Paragraph::new("")
+                .block(Block::default().borders(Borders::NONE));
+            
+            f.render_widget(empty_footer, chunks[export_notification_index]);
+        }
+    }
 }
 
-
-
 /// Export packets to CSV file
-pub fn export_packets_to_csv(app: &App, process_info: &crate::types::ProcessInfo, _pid: i32) -> Result<(), Box<dyn std::error::Error>> {
+pub fn export_packets_to_csv(app: &mut App, process_info: &crate::types::ProcessInfo, _pid: i32) -> Result<(), Box<dyn std::error::Error>> {
     use std::fs::File;
     use std::io::Write;
+    use std::env;
+    use std::time::Instant;
     
     // Create filename with timestamp
     let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let filename = format!("packets_{}_{}.csv", process_info.name.replace(" ", "_"), timestamp);
+    
+    // Get current directory for display
+    let current_dir = env::current_dir()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "current directory".to_string());
     
     let mut file = File::create(&filename)?;
     
@@ -293,7 +351,7 @@ pub fn export_packets_to_csv(app: &App, process_info: &crate::types::ProcessInfo
     writeln!(file, "Timestamp,Direction,Protocol,Source_IP,Source_Port,Dest_IP,Dest_Port,Size_Bytes")?;
     
     // Apply same filtering logic as the UI
-    let filtered_iter = process_info.packet_history.iter().filter(|p| {
+    let filtered_packets: Vec<_> = process_info.packet_history.iter().filter(|p| {
         if let Some(filter) = &app.packet_filter {
             if let Some(proto) = filter.protocol {
                 if p.protocol != proto { return false; }
@@ -307,10 +365,12 @@ pub fn export_packets_to_csv(app: &App, process_info: &crate::types::ProcessInfo
             }
         }
         true
-    });
+    }).collect();
+    
+    let packet_count = filtered_packets.len();
     
     // Write packet data
-    for packet in filtered_iter {
+    for packet in filtered_packets {
         let ts: chrono::DateTime<chrono::Local> = packet.timestamp.into();
         let direction = match packet.direction {
             PacketDirection::Sent => "Sent",
@@ -339,6 +399,18 @@ pub fn export_packets_to_csv(app: &App, process_info: &crate::types::ProcessInfo
         )?;
     }
     
-    eprintln!("Exported packets to: {}", filename);
+    // Set export notification with detailed information
+    let full_path = std::path::Path::new(&current_dir).join(&filename);
+    let export_msg = format!(
+        "✓ Successfully exported {} packets to:\n{}\n\nFile: {}",
+        packet_count,
+        current_dir,
+        filename
+    );
+    
+    app.export_notification_state = crate::types::NotificationState::Active(export_msg);
+    app.export_notification_time = Some(Instant::now());
+    
+    eprintln!("Exported {} packets to: {}", packet_count, full_path.display());
     Ok(())
 } 

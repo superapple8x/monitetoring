@@ -694,9 +694,12 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
         Char('e') => {
             // Export filtered packets to CSV
             if let Some(pid) = app.selected_process {
-                if let Some(process_info) = app.stats.get(&pid) {
-                    if let Err(e) = crate::ui::renderers::packet_details::export_packets_to_csv(app, process_info, pid) {
-                        // Could add a notification system for export errors
+                // Clone the process info to avoid borrowing conflicts
+                if let Some(process_info) = app.stats.get(&pid).cloned() {
+                    if let Err(e) = crate::ui::renderers::packet_details::export_packets_to_csv(app, &process_info, pid) {
+                        // Set error notification instead of using eprintln
+                        app.export_notification_state = crate::types::NotificationState::Active(format!("❌ Export failed: {}", e));
+                        app.export_notification_time = Some(std::time::Instant::now());
                         eprintln!("Export error: {}", e);
                     }
                 }

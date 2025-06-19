@@ -187,6 +187,14 @@ pub enum ChartType {
     SystemStacked,   // Stacked area chart for all processes
 }
 
+/// Export notification state to prevent UI artifacts
+#[derive(Clone, Debug, PartialEq)]
+pub enum NotificationState {
+    None,
+    Active(String),
+    Expiring, // Intermediate state during cleanup
+}
+
 pub struct App {
     pub start_time: Instant,
     pub stats: HashMap<i32, ProcessInfo>,
@@ -240,6 +248,11 @@ pub struct App {
     pub packet_sort_direction: PacketSortDirection,
     pub packet_search_mode: bool,           // Whether we're in search input mode
     pub packet_search_input: String,       // Current search input buffer
+    // Enhanced export notification system
+    pub export_notification_state: NotificationState, // Enhanced state management
+    pub export_notification_time: Option<Instant>, // When export notification was set
+    // Force redraw mechanism to prevent UI artifacts
+    pub force_redraw: bool, // Flag to force complete screen redraw
 }
 
 impl App {
@@ -297,6 +310,11 @@ impl App {
             packet_sort_direction: PacketSortDirection::Desc,  // Newest first by default
             packet_search_mode: false,
             packet_search_input: String::new(),
+            // Enhanced export notification system
+            export_notification_state: NotificationState::None, // Enhanced state management
+            export_notification_time: None,
+            // Force redraw mechanism to prevent UI artifacts
+            force_redraw: false, // Flag to force complete screen redraw
         }
     }
 
