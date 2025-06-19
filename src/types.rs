@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 use ratatui::style::Color;
+use regex;
 
 // Process cleanup configuration
 pub const PROCESS_CLEANUP_INTERVAL_SECS: u64 = 5; // Check for dead processes every 5 seconds
@@ -47,14 +48,26 @@ pub struct PacketInfo {
     pub dst_ip: std::net::IpAddr,
     pub dst_port: u16,
     pub size: usize,
+    // Cached pre-formatted strings for fast rendering
+    #[serde(skip_serializing)]
+    pub cached_ts: String,
+    #[serde(skip_serializing)]
+    pub cached_src: String,
+    #[serde(skip_serializing)]
+    pub cached_dst: String,
+    #[serde(skip_serializing)]
+    pub cached_proto: String,
+    #[serde(skip_serializing)]
+    pub cached_size: String,
 }
 
 /// Optional filter applied in Packet Details view
-#[derive(Clone, Serialize)]
+#[derive(Clone)]
 pub struct PacketFilter {
     pub protocol: Option<u8>,               // e.g. Some(6) for TCP
     pub direction: Option<PacketDirection>, // Sent or Received
-    pub search_term: Option<String>,        // Text search in IP addresses and ports
+    pub search_term: Option<String>,        // Raw input string (for redisplay)
+    pub search_regex: Option<regex::Regex>, // Compiled regex when provided
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -195,6 +208,16 @@ pub enum NotificationState {
     Expiring, // Intermediate state during cleanup
 }
 
+/// Metadata describing the current state of the cached, filtered & sorted packet list.
+#[derive(Clone)]
+pub struct PacketCacheMeta {
+    pub pid: i32,
+    pub filter: Option<PacketFilter>,
+    pub sort_column: PacketSortColumn,
+    pub sort_direction: PacketSortDirection,
+    pub history_len: usize,
+}
+
 pub struct App {
     pub start_time: Instant,
     pub stats: HashMap<i32, ProcessInfo>,
@@ -248,11 +271,16 @@ pub struct App {
     pub packet_sort_direction: PacketSortDirection,
     pub packet_search_mode: bool,           // Whether we're in search input mode
     pub packet_search_input: String,       // Current search input buffer
+    // Last measured visible rows in packet table (set during render)
+    pub packet_visible_rows: usize,
     // Enhanced export notification system
     pub export_notification_state: NotificationState, // Enhanced state management
     pub export_notification_time: Option<Instant>, // When export notification was set
     // Force redraw mechanism to prevent UI artifacts
     pub force_redraw: bool, // Flag to force complete screen redraw
+    // Packet cache for performance
+    pub packet_cache: Vec<usize>, // indices into packet_history after filtering & sorting
+    pub packet_cache_meta: Option<PacketCacheMeta>,
 }
 
 impl App {
@@ -310,11 +338,15 @@ impl App {
             packet_sort_direction: PacketSortDirection::Desc,  // Newest first by default
             packet_search_mode: false,
             packet_search_input: String::new(),
+            packet_visible_rows: 0,
             // Enhanced export notification system
             export_notification_state: NotificationState::None, // Enhanced state management
             export_notification_time: None,
             // Force redraw mechanism to prevent UI artifacts
             force_redraw: false, // Flag to force complete screen redraw
+            // Packet cache initialisation
+            packet_cache: Vec::new(),
+            packet_cache_meta: None,
         }
     }
 

@@ -463,31 +463,44 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
                 // Clear search filter
                 if let Some(filter) = &mut app.packet_filter {
                     filter.search_term = None;
+                    filter.search_regex = None;
                 } else {
                     app.packet_filter = Some(crate::types::PacketFilter { 
                         protocol: None, 
                         direction: None, 
-                        search_term: None 
+                        search_term: None,
+                        search_regex: None,
                     });
                 }
                 app.packet_scroll_offset = 0;
             }
             Enter => {
+                use regex::Regex;
                 app.packet_search_mode = false;
-                // Apply search filter
-                let search_term = if app.packet_search_input.trim().is_empty() {
-                    None
+
+                let trimmed = app.packet_search_input.trim();
+
+                let (search_term, search_regex) = if trimmed.is_empty() {
+                    (None, None)
+                } else if trimmed.starts_with("regex:") {
+                    let pattern = &trimmed[6..];
+                    match Regex::new(pattern) {
+                        Ok(re) => (Some(trimmed.to_string()), Some(re)),
+                        Err(_) => (Some(trimmed.to_string()), None), // fallback to no regex if invalid
+                    }
                 } else {
-                    Some(app.packet_search_input.trim().to_lowercase())
+                    (Some(trimmed.to_lowercase()), None)
                 };
-                
+
                 if let Some(filter) = &mut app.packet_filter {
                     filter.search_term = search_term;
+                    filter.search_regex = search_regex;
                 } else {
-                    app.packet_filter = Some(crate::types::PacketFilter { 
-                        protocol: None, 
-                        direction: None, 
-                        search_term 
+                    app.packet_filter = Some(crate::types::PacketFilter {
+                        protocol: None,
+                        direction: None,
+                        search_term,
+                        search_regex,
                     });
                 }
                 app.packet_scroll_offset = 0;
@@ -523,6 +536,22 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
                  app.packet_scroll_offset += 1;
             }
         }
+        PageUp => {
+            let page = app.packet_visible_rows.max(1);
+            if app.packet_scroll_offset >= page {
+                app.packet_scroll_offset -= page;
+            } else {
+                app.packet_scroll_offset = 0;
+            }
+        }
+        PageDown => {
+            let num_packets = if let Some(pid) = app.selected_process {
+                app.stats.get(&pid).map(|p| p.packet_history.len()).unwrap_or(0)
+            } else { 0 };
+
+            let page = app.packet_visible_rows.max(1);
+            app.packet_scroll_offset = (app.packet_scroll_offset + page).min(num_packets.saturating_sub(1));
+        }
         Char('t') => {
             // Cycle through protocol filters: None -> TCP -> UDP -> None
             if let Some(filter) = &mut app.packet_filter {
@@ -537,6 +566,7 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
                     protocol: Some(6), // Start with TCP
                     direction: None,
                     search_term: None,
+                    search_regex: None,
                 });
             }
             // Reset scroll when filtering changes
@@ -555,6 +585,7 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
                     protocol: None,
                     direction: Some(crate::types::PacketDirection::Sent),
                     search_term: None,
+                    search_regex: None,
                 });
             }
             // Reset scroll when filtering changes
@@ -574,6 +605,7 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
                     protocol: Some(17), // UDP
                     direction: None,
                     search_term: None,
+                    search_regex: None,
                 });
             }
             app.packet_scroll_offset = 0;
@@ -587,6 +619,7 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
                     protocol: Some(1), // ICMP
                     direction: None,
                     search_term: None,
+                    search_regex: None,
                 });
             }
             app.packet_scroll_offset = 0;
@@ -604,6 +637,7 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
                     protocol: None,
                     direction: Some(crate::types::PacketDirection::Sent),
                     search_term: None,
+                    search_regex: None,
                 });
             }
             app.packet_scroll_offset = 0;

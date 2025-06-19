@@ -504,8 +504,21 @@ async fn main() -> Result<(), io::Error> {
                                 // Record individual packet information for history view
                                 {
                                     use crate::types::{PacketInfo, PacketDirection, MAX_PACKET_HISTORY};
+                                    let ts_now = std::time::SystemTime::now();
+                                    let dt: chrono::DateTime<chrono::Local> = ts_now.into();
+                                    let cached_ts = dt.format("%H:%M:%S%.3f").to_string();
+                                    let cached_src = format!("{}:{}", conn.source_ip, conn.source_port);
+                                    let cached_dst = format!("{}:{}", conn.dest_ip, conn.dest_port);
+                                    let cached_proto = match conn.protocol {
+                                        6 => "TCP".to_string(),
+                                        17 => "UDP".to_string(),
+                                        1 => "ICMP".to_string(),
+                                        other => other.to_string(),
+                                    };
+                                    let cached_size = format_bytes(packet.data.len() as u64);
+
                                     let pinfo = PacketInfo {
-                                        timestamp: std::time::SystemTime::now(),
+                                        timestamp: ts_now,
                                         direction: PacketDirection::Sent,
                                         protocol: conn.protocol,
                                         src_ip: conn.source_ip,
@@ -513,6 +526,11 @@ async fn main() -> Result<(), io::Error> {
                                         dst_ip: conn.dest_ip,
                                         dst_port: conn.dest_port,
                                         size: packet.data.len(),
+                                        cached_ts,
+                                        cached_src,
+                                        cached_dst,
+                                        cached_proto,
+                                        cached_size,
                                     };
                                     if stats.packet_history.len() >= MAX_PACKET_HISTORY {
                                         stats.packet_history.pop_front();
@@ -524,8 +542,21 @@ async fn main() -> Result<(), io::Error> {
                                 stats.received += packet.data.len() as u64;
                                 {
                                     use crate::types::{PacketInfo, PacketDirection, MAX_PACKET_HISTORY};
+                                    let ts_now = std::time::SystemTime::now();
+                                    let dt: chrono::DateTime<chrono::Local> = ts_now.into();
+                                    let cached_ts = dt.format("%H:%M:%S%.3f").to_string();
+                                    let cached_src = format!("{}:{}", conn.dest_ip, conn.dest_port);
+                                    let cached_dst = format!("{}:{}", conn.source_ip, conn.source_port);
+                                    let cached_proto = match conn.protocol {
+                                        6 => "TCP".to_string(),
+                                        17 => "UDP".to_string(),
+                                        1 => "ICMP".to_string(),
+                                        other => other.to_string(),
+                                    };
+                                    let cached_size = format_bytes(packet.data.len() as u64);
+
                                     let pinfo = PacketInfo {
-                                        timestamp: std::time::SystemTime::now(),
+                                        timestamp: ts_now,
                                         direction: PacketDirection::Received,
                                         protocol: conn.protocol,
                                         src_ip: conn.dest_ip,
@@ -533,6 +564,11 @@ async fn main() -> Result<(), io::Error> {
                                         dst_ip: conn.source_ip,
                                         dst_port: conn.source_port,
                                         size: packet.data.len(),
+                                        cached_ts,
+                                        cached_src,
+                                        cached_dst,
+                                        cached_proto,
+                                        cached_size,
                                     };
                                     if stats.packet_history.len() >= MAX_PACKET_HISTORY {
                                         stats.packet_history.pop_front();
