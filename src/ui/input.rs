@@ -14,6 +14,7 @@ pub fn handle_key_event(app: &mut App, key: crossterm::event::KeyCode) -> bool {
         AppMode::Normal => handle_normal_mode_keys(app, key),
         AppMode::SystemOverview => handle_overview_mode_keys(app, key),
         AppMode::Settings => handle_settings_mode_keys(app, key),
+        AppMode::PacketDetails => handle_packet_details_mode_keys(app, key),
     }
 }
 
@@ -109,10 +110,10 @@ fn handle_normal_mode_keys(app: &mut App, key: KeyCode) -> bool {
 
 /// Handle key events when action panel is shown
 fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
-    let mut num_actions = 2; // Kill, Edit
+    let mut num_actions = 3; // Kill, Edit, Details
     if let Some(pid) = app.selected_process {
         if app.alerts.contains_key(&pid) {
-            num_actions = 3; // Add Remove option
+            num_actions = 4; // Add Remove option
         }
     }
 
@@ -137,7 +138,8 @@ fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
                 let action_str = match app.selected_action {
                     0 => "Kill",
                     1 => "Edit",
-                    2 if has_alert => "Remove",
+                    2 => "Details",
+                    3 if has_alert => "Remove",
                     _ => "",
                 };
 
@@ -207,6 +209,11 @@ fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
                             app.selected_alert_action = 0;
                         }
                         app.command_input.clear();
+                    }
+                    "Details" => {
+                        app.mode = AppMode::PacketDetails;
+                        app.packet_scroll_offset = 0;
+                        app.packet_filter = None;
                     }
                     "Remove" => {
                         app.alerts.remove(&pid);
@@ -436,6 +443,115 @@ fn handle_settings_mode_keys(app: &mut App, key: KeyCode) -> bool {
                     app.settings_notification_time = Some(std::time::Instant::now());
                 }
             }
+        }
+        _ => {}
+    }
+    false
+}
+
+/// Handle key events in Packet Details view
+fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
+    use crossterm::event::KeyCode::*;
+
+    match key {
+        Esc => {
+            app.mode = AppMode::Normal;
+        }
+        Up => {
+            if app.packet_scroll_offset > 0 {
+                app.packet_scroll_offset -= 1;
+            }
+        }
+        Down => {
+            let num_packets = if let Some(pid) = app.selected_process {
+                if let Some(pinfo) = app.stats.get(&pid) {
+                    pinfo.packet_history.len()
+                } else { 0 }
+            } else { 0 };
+
+            if num_packets > 0 && app.packet_scroll_offset < num_packets - 1 {
+                 app.packet_scroll_offset += 1;
+            }
+        }
+        Char('t') => {
+            // Cycle through protocol filters: None -> TCP -> UDP -> None
+            if let Some(filter) = &mut app.packet_filter {
+                filter.protocol = match filter.protocol {
+                    None => Some(6),        // TCP
+                    Some(6) => Some(17),    // UDP
+                    Some(17) => None,       // Back to All
+                    _ => Some(6),           // Default to TCP for other protocols
+                };
+            } else {
+                app.packet_filter = Some(crate::types::PacketFilter { 
+                    protocol: Some(6), // Start with TCP
+                    direction: None 
+                });
+            }
+            // Reset scroll when filtering changes
+            app.packet_scroll_offset = 0;
+        }
+        Char('r') => {
+            // Cycle through direction filters: None -> Sent -> Received -> None
+            if let Some(filter) = &mut app.packet_filter {
+                filter.direction = match filter.direction {
+                    None => Some(crate::types::PacketDirection::Sent),
+                    Some(crate::types::PacketDirection::Sent) => Some(crate::types::PacketDirection::Received),
+                    Some(crate::types::PacketDirection::Received) => None,
+                };
+            } else {
+                app.packet_filter = Some(crate::types::PacketFilter { 
+                    protocol: None,
+                    direction: Some(crate::types::PacketDirection::Sent)
+                });
+            }
+            // Reset scroll when filtering changes
+            app.packet_scroll_offset = 0;
+        }
+        Char('c') => {
+            // Clear all filters
+            app.packet_filter = None;
+            app.packet_scroll_offset = 0;
+        }
+        Char('u') => {
+            // Quick shortcut for UDP filter
+            if let Some(filter) = &mut app.packet_filter {
+                filter.protocol = if filter.protocol == Some(17) { None } else { Some(17) };
+            } else {
+                app.packet_filter = Some(crate::types::PacketFilter { 
+                    protocol: Some(17), // UDP
+                    direction: None 
+                });
+            }
+            app.packet_scroll_offset = 0;
+        }
+        Char('i') => {
+            // Quick shortcut for ICMP filter
+            if let Some(filter) = &mut app.packet_filter {
+                filter.protocol = if filter.protocol == Some(1) { None } else { Some(1) };
+            } else {
+                app.packet_filter = Some(crate::types::PacketFilter { 
+                    protocol: Some(1), // ICMP
+                    direction: None 
+                });
+            }
+            app.packet_scroll_offset = 0;
+        }
+        Char('s') => {
+            // Quick shortcut to filter by Sent packets only
+            if let Some(filter) = &mut app.packet_filter {
+                filter.direction = if filter.direction == Some(crate::types::PacketDirection::Sent) {
+                    None
+                } else {
+                    Some(crate::types::PacketDirection::Sent)
+                };
+            } else {
+                app.packet_filter = Some(crate::types::PacketFilter { 
+                    protocol: None,
+                    direction: Some(crate::types::PacketDirection::Sent)
+                });
+            }
+            app.packet_scroll_offset = 0;
         }
         _ => {}
     }

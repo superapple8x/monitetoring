@@ -494,15 +494,51 @@ async fn main() -> Result<(), io::Error> {
                                 has_alert: false, // Default value
                                 sent_history: Vec::new(),
                                 received_history: Vec::new(),
+                                packet_history: std::collections::VecDeque::new(),
                             });
                             
                             // Determine direction based on which connection matched
                             if matched_conn == conn {
                                 // Original packet direction: process is sending data (outbound)
                                 stats.sent += packet.data.len() as u64;
+                                // Record individual packet information for history view
+                                {
+                                    use crate::types::{PacketInfo, PacketDirection, MAX_PACKET_HISTORY};
+                                    let pinfo = PacketInfo {
+                                        timestamp: std::time::SystemTime::now(),
+                                        direction: PacketDirection::Sent,
+                                        protocol: conn.protocol,
+                                        src_ip: conn.source_ip,
+                                        src_port: conn.source_port,
+                                        dst_ip: conn.dest_ip,
+                                        dst_port: conn.dest_port,
+                                        size: packet.data.len(),
+                                    };
+                                    if stats.packet_history.len() >= MAX_PACKET_HISTORY {
+                                        stats.packet_history.pop_front();
+                                    }
+                                    stats.packet_history.push_back(pinfo);
+                                }
                             } else {
                                 // Reverse connection matched: process is receiving data (inbound)  
                                 stats.received += packet.data.len() as u64;
+                                {
+                                    use crate::types::{PacketInfo, PacketDirection, MAX_PACKET_HISTORY};
+                                    let pinfo = PacketInfo {
+                                        timestamp: std::time::SystemTime::now(),
+                                        direction: PacketDirection::Received,
+                                        protocol: conn.protocol,
+                                        src_ip: conn.dest_ip,
+                                        src_port: conn.dest_port,
+                                        dst_ip: conn.source_ip,
+                                        dst_port: conn.source_port,
+                                        size: packet.data.len(),
+                                    };
+                                    if stats.packet_history.len() >= MAX_PACKET_HISTORY {
+                                        stats.packet_history.pop_front();
+                                    }
+                                    stats.packet_history.push_back(pinfo);
+                                }
                             }
                         }
                     }
@@ -630,7 +666,7 @@ async fn main() -> Result<(), io::Error> {
                         let entry = app.stats.entry(pid).or_insert_with(|| {
                             // If process is new, create a new ProcessInfo for it
                             let mut pi = new_info.clone();
-                            // Allocate enough space for ~5 minutes of data with 100 ms samples (≈3 000 points)
+                            // Allocate enough space for ~5 minutes of data for history vectors
                             pi.sent_history = Vec::with_capacity(3_100);
                             pi.received_history = Vec::with_capacity(3_100);
                             pi
@@ -642,10 +678,11 @@ async fn main() -> Result<(), io::Error> {
                         entry.sent_rate = new_info.sent_rate;
                         entry.received_rate = new_info.received_rate;
                         entry.name = new_info.name;
+                        entry.packet_history = new_info.packet_history;
 
                         // Update the per-process history for the chart
-                        entry.sent_history.push((now, new_info.sent_rate as f64));
-                        entry.received_history.push((now, new_info.received_rate as f64));
+                        entry.sent_history.push((now, entry.sent_rate as f64));
+                        entry.received_history.push((now, entry.received_rate as f64));
 
                         // Trim history vectors to prevent them from growing indefinitely
                         // Keep at most ~5 minutes (≈3 000 points) of history to match the chart window

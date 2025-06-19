@@ -6,6 +6,36 @@ use ratatui::style::Color;
 // Process cleanup configuration
 pub const PROCESS_CLEANUP_INTERVAL_SECS: u64 = 5; // Check for dead processes every 5 seconds
 
+/// Maximum number of packets kept per process for the packet history view
+pub const MAX_PACKET_HISTORY: usize = 5_000;
+
+/// Direction of a packet relative to the monitored process
+#[derive(Clone, Copy, PartialEq, Serialize)]
+pub enum PacketDirection {
+    Sent,
+    Received,
+}
+
+/// Minimal information we store about each captured packet
+#[derive(Clone, Serialize)]
+pub struct PacketInfo {
+    pub timestamp: std::time::SystemTime,
+    pub direction: PacketDirection,
+    pub protocol: u8,
+    pub src_ip: std::net::IpAddr,
+    pub src_port: u16,
+    pub dst_ip: std::net::IpAddr,
+    pub dst_port: u16,
+    pub size: usize,
+}
+
+/// Optional filter applied in Packet Details view
+#[derive(Clone, Serialize)]
+pub struct PacketFilter {
+    pub protocol: Option<u8>,               // e.g. Some(6) for TCP
+    pub direction: Option<PacketDirection>, // Sent or Received
+}
+
 fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     const THRESHOLD: f64 = 1024.0;
@@ -46,6 +76,8 @@ pub struct ProcessInfo {
     pub has_alert: bool,
     pub sent_history: Vec<(f64, f64)>,
     pub received_history: Vec<(f64, f64)>,
+    /// Bounded history of individual packets (headers only)
+    pub packet_history: std::collections::VecDeque<PacketInfo>,
 }
 
 #[derive(Clone, Serialize)]
@@ -113,6 +145,7 @@ pub enum AppMode {
     EditingAlert,
     SystemOverview,
     Settings,
+    PacketDetails, // NEW - per-process packet list view
 }
 
 pub enum EditingField {
@@ -179,6 +212,9 @@ pub struct App {
     // Settings mode fields
     pub settings_notification: Option<String>, // Notification for settings mode
     pub settings_notification_time: Option<Instant>, // When settings notification was set
+    // Packet details view state
+    pub packet_scroll_offset: usize,
+    pub packet_filter: Option<PacketFilter>,
 }
 
 impl App {
@@ -229,6 +265,9 @@ impl App {
             // Settings mode fields
             settings_notification: None, // Notification for settings mode
             settings_notification_time: None, // When settings notification was set
+            // Packet details view state
+            packet_scroll_offset: 0,
+            packet_filter: None,
         }
     }
 

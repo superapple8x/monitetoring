@@ -411,7 +411,7 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 /// Render the action panel
 fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is_cramped: bool) {
     let action_panel_text = if let Some(pid) = app.selected_process {
-        let mut actions = vec!["Kill Process", "Set/Edit Bandwidth Alert"];
+        let mut actions = vec!["Kill Process", "Set/Edit Bandwidth Alert", "Show Packet Details"];
         if app.alerts.contains_key(&pid) {
             actions.push("Remove Alert");
         }
