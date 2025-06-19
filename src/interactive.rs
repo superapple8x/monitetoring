@@ -4,8 +4,7 @@ use crate::config::{SavedConfig, load_config, save_config};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use std::thread;
-use pcap::Capture;
-use crate::capture::connection_from_packet;
+
 
 pub struct InteractiveConfig {
     pub interface: String,

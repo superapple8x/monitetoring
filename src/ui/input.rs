@@ -452,6 +452,56 @@ fn handle_settings_mode_keys(app: &mut App, key: KeyCode) -> bool {
 /// Handle key events in Packet Details view
 fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
     use crossterm::event::KeyCode::*;
+    use crate::types::{PacketSortColumn, PacketSortDirection};
+
+    // Handle search input mode first
+    if app.packet_search_mode {
+        match key {
+            Esc => {
+                app.packet_search_mode = false;
+                app.packet_search_input.clear();
+                // Clear search filter
+                if let Some(filter) = &mut app.packet_filter {
+                    filter.search_term = None;
+                } else {
+                    app.packet_filter = Some(crate::types::PacketFilter { 
+                        protocol: None, 
+                        direction: None, 
+                        search_term: None 
+                    });
+                }
+                app.packet_scroll_offset = 0;
+            }
+            Enter => {
+                app.packet_search_mode = false;
+                // Apply search filter
+                let search_term = if app.packet_search_input.trim().is_empty() {
+                    None
+                } else {
+                    Some(app.packet_search_input.trim().to_lowercase())
+                };
+                
+                if let Some(filter) = &mut app.packet_filter {
+                    filter.search_term = search_term;
+                } else {
+                    app.packet_filter = Some(crate::types::PacketFilter { 
+                        protocol: None, 
+                        direction: None, 
+                        search_term 
+                    });
+                }
+                app.packet_scroll_offset = 0;
+            }
+            Backspace => {
+                app.packet_search_input.pop();
+            }
+            Char(c) => {
+                app.packet_search_input.push(c);
+            }
+            _ => {}
+        }
+        return false;
+    }
 
     match key {
         Esc => {
@@ -485,7 +535,8 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
             } else {
                 app.packet_filter = Some(crate::types::PacketFilter { 
                     protocol: Some(6), // Start with TCP
-                    direction: None 
+                    direction: None,
+                    search_term: None,
                 });
             }
             // Reset scroll when filtering changes
@@ -502,7 +553,8 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
             } else {
                 app.packet_filter = Some(crate::types::PacketFilter { 
                     protocol: None,
-                    direction: Some(crate::types::PacketDirection::Sent)
+                    direction: Some(crate::types::PacketDirection::Sent),
+                    search_term: None,
                 });
             }
             // Reset scroll when filtering changes
@@ -520,7 +572,8 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
             } else {
                 app.packet_filter = Some(crate::types::PacketFilter { 
                     protocol: Some(17), // UDP
-                    direction: None 
+                    direction: None,
+                    search_term: None,
                 });
             }
             app.packet_scroll_offset = 0;
@@ -532,7 +585,8 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
             } else {
                 app.packet_filter = Some(crate::types::PacketFilter { 
                     protocol: Some(1), // ICMP
-                    direction: None 
+                    direction: None,
+                    search_term: None,
                 });
             }
             app.packet_scroll_offset = 0;
@@ -548,10 +602,105 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
             } else {
                 app.packet_filter = Some(crate::types::PacketFilter { 
                     protocol: None,
-                    direction: Some(crate::types::PacketDirection::Sent)
+                    direction: Some(crate::types::PacketDirection::Sent),
+                    search_term: None,
                 });
             }
             app.packet_scroll_offset = 0;
+        }
+        Char('/') => {
+            // Enter search mode
+            app.packet_search_mode = true;
+            app.packet_search_input.clear();
+        }
+        Char('1') => {
+            // Sort by Timestamp 
+            if app.packet_sort_column == PacketSortColumn::Timestamp {
+                app.packet_sort_direction = match app.packet_sort_direction {
+                    PacketSortDirection::Desc => PacketSortDirection::Asc,
+                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                };
+            } else {
+                app.packet_sort_column = PacketSortColumn::Timestamp;
+                app.packet_sort_direction = PacketSortDirection::Desc; // Newest first by default
+            }
+            app.packet_scroll_offset = 0;
+        }
+        Char('2') => {
+            // Sort by Direction
+            if app.packet_sort_column == PacketSortColumn::Direction {
+                app.packet_sort_direction = match app.packet_sort_direction {
+                    PacketSortDirection::Desc => PacketSortDirection::Asc,
+                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                };
+            } else {
+                app.packet_sort_column = PacketSortColumn::Direction;
+                app.packet_sort_direction = PacketSortDirection::Asc;
+            }
+            app.packet_scroll_offset = 0;
+        }
+        Char('3') => {
+            // Sort by Protocol
+            if app.packet_sort_column == PacketSortColumn::Protocol {
+                app.packet_sort_direction = match app.packet_sort_direction {
+                    PacketSortDirection::Desc => PacketSortDirection::Asc,
+                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                };
+            } else {
+                app.packet_sort_column = PacketSortColumn::Protocol;
+                app.packet_sort_direction = PacketSortDirection::Asc;
+            }
+            app.packet_scroll_offset = 0;
+        }
+        Char('4') => {
+            // Sort by Source
+            if app.packet_sort_column == PacketSortColumn::SourceIp {
+                app.packet_sort_direction = match app.packet_sort_direction {
+                    PacketSortDirection::Desc => PacketSortDirection::Asc,
+                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                };
+            } else {
+                app.packet_sort_column = PacketSortColumn::SourceIp;
+                app.packet_sort_direction = PacketSortDirection::Asc;
+            }
+            app.packet_scroll_offset = 0;
+        }
+        Char('5') => {
+            // Sort by Destination
+            if app.packet_sort_column == PacketSortColumn::DestIp {
+                app.packet_sort_direction = match app.packet_sort_direction {
+                    PacketSortDirection::Desc => PacketSortDirection::Asc,
+                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                };
+            } else {
+                app.packet_sort_column = PacketSortColumn::DestIp;
+                app.packet_sort_direction = PacketSortDirection::Asc;
+            }
+            app.packet_scroll_offset = 0;
+        }
+        Char('6') => {
+            // Sort by Size
+            if app.packet_sort_column == PacketSortColumn::Size {
+                app.packet_sort_direction = match app.packet_sort_direction {
+                    PacketSortDirection::Desc => PacketSortDirection::Asc,
+                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                };
+            } else {
+                app.packet_sort_column = PacketSortColumn::Size;
+                app.packet_sort_direction = PacketSortDirection::Desc; // Largest first by default
+            }
+            app.packet_scroll_offset = 0;
+        }
+        Char('e') => {
+            // Export filtered packets to CSV
+            if let Some(pid) = app.selected_process {
+                if let Some(process_info) = app.stats.get(&pid) {
+                    if let Err(e) = crate::ui::renderers::packet_details::export_packets_to_csv(app, process_info, pid) {
+                        // Could add a notification system for export errors
+                        eprintln!("Export error: {}", e);
+                    }
+                }
+            }
         }
         _ => {}
     }

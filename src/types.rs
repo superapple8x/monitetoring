@@ -10,10 +10,30 @@ pub const PROCESS_CLEANUP_INTERVAL_SECS: u64 = 5; // Check for dead processes ev
 pub const MAX_PACKET_HISTORY: usize = 5_000;
 
 /// Direction of a packet relative to the monitored process
-#[derive(Clone, Copy, PartialEq, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum PacketDirection {
     Sent,
     Received,
+}
+
+/// Sorting columns for packet details view
+#[derive(Clone, Copy, PartialEq)]
+pub enum PacketSortColumn {
+    Timestamp,
+    Direction,
+    Protocol,
+    SourceIp,
+    SourcePort,
+    DestIp,
+    DestPort,
+    Size,
+}
+
+/// Sorting direction for packet details
+#[derive(Clone, Copy, PartialEq)]
+pub enum PacketSortDirection {
+    Asc,
+    Desc,
 }
 
 /// Minimal information we store about each captured packet
@@ -34,6 +54,7 @@ pub struct PacketInfo {
 pub struct PacketFilter {
     pub protocol: Option<u8>,               // e.g. Some(6) for TCP
     pub direction: Option<PacketDirection>, // Sent or Received
+    pub search_term: Option<String>,        // Text search in IP addresses and ports
 }
 
 fn format_bytes(bytes: u64) -> String {
@@ -215,6 +236,10 @@ pub struct App {
     // Packet details view state
     pub packet_scroll_offset: usize,
     pub packet_filter: Option<PacketFilter>,
+    pub packet_sort_column: PacketSortColumn,
+    pub packet_sort_direction: PacketSortDirection,
+    pub packet_search_mode: bool,           // Whether we're in search input mode
+    pub packet_search_input: String,       // Current search input buffer
 }
 
 impl App {
@@ -268,6 +293,10 @@ impl App {
             // Packet details view state
             packet_scroll_offset: 0,
             packet_filter: None,
+            packet_sort_column: PacketSortColumn::Timestamp,
+            packet_sort_direction: PacketSortDirection::Desc,  // Newest first by default
+            packet_search_mode: false,
+            packet_search_input: String::new(),
         }
     }
 

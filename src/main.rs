@@ -7,7 +7,7 @@ mod interactive;
 mod dependencies;
 
 use clap::Parser;
-use pcap::{Device, Capture};
+
 use std::process::{exit, Command};
 use std::collections::HashMap;
 use std::time::{Instant, Duration};
