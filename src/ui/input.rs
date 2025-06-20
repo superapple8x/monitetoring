@@ -680,56 +680,76 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
             app.packet_scroll_offset = 0;
         }
         Char('3') => {
-            // Sort by Protocol
             if app.packet_sort_column == PacketSortColumn::Protocol {
-                app.packet_sort_direction = match app.packet_sort_direction {
-                    PacketSortDirection::Desc => PacketSortDirection::Asc,
-                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                app.packet_sort_direction = if app.packet_sort_direction == PacketSortDirection::Asc {
+                    PacketSortDirection::Desc
+                } else {
+                    PacketSortDirection::Asc
                 };
             } else {
                 app.packet_sort_column = PacketSortColumn::Protocol;
                 app.packet_sort_direction = PacketSortDirection::Asc;
             }
-            app.packet_scroll_offset = 0;
         }
         Char('4') => {
-            // Sort by Source
             if app.packet_sort_column == PacketSortColumn::SourceIp {
-                app.packet_sort_direction = match app.packet_sort_direction {
-                    PacketSortDirection::Desc => PacketSortDirection::Asc,
-                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                app.packet_sort_direction = if app.packet_sort_direction == PacketSortDirection::Asc {
+                    PacketSortDirection::Desc
+                } else {
+                    PacketSortDirection::Asc
                 };
             } else {
                 app.packet_sort_column = PacketSortColumn::SourceIp;
                 app.packet_sort_direction = PacketSortDirection::Asc;
             }
-            app.packet_scroll_offset = 0;
         }
         Char('5') => {
-            // Sort by Destination
+            if app.packet_sort_column == PacketSortColumn::SourcePort {
+                app.packet_sort_direction = if app.packet_sort_direction == PacketSortDirection::Asc {
+                    PacketSortDirection::Desc
+                } else {
+                    PacketSortDirection::Asc
+                };
+            } else {
+                app.packet_sort_column = PacketSortColumn::SourcePort;
+                app.packet_sort_direction = PacketSortDirection::Asc;
+            }
+        }
+        Char('6') => {
             if app.packet_sort_column == PacketSortColumn::DestIp {
-                app.packet_sort_direction = match app.packet_sort_direction {
-                    PacketSortDirection::Desc => PacketSortDirection::Asc,
-                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                app.packet_sort_direction = if app.packet_sort_direction == PacketSortDirection::Asc {
+                    PacketSortDirection::Desc
+                } else {
+                    PacketSortDirection::Asc
                 };
             } else {
                 app.packet_sort_column = PacketSortColumn::DestIp;
                 app.packet_sort_direction = PacketSortDirection::Asc;
             }
-            app.packet_scroll_offset = 0;
         }
-        Char('6') => {
-            // Sort by Size
+        Char('7') => {
+            if app.packet_sort_column == PacketSortColumn::DestPort {
+                app.packet_sort_direction = if app.packet_sort_direction == PacketSortDirection::Asc {
+                    PacketSortDirection::Desc
+                } else {
+                    PacketSortDirection::Asc
+                };
+            } else {
+                app.packet_sort_column = PacketSortColumn::DestPort;
+                app.packet_sort_direction = PacketSortDirection::Asc;
+            }
+        }
+        KeyCode::Char('8') => {
             if app.packet_sort_column == PacketSortColumn::Size {
-                app.packet_sort_direction = match app.packet_sort_direction {
-                    PacketSortDirection::Desc => PacketSortDirection::Asc,
-                    PacketSortDirection::Asc => PacketSortDirection::Desc,
+                app.packet_sort_direction = if app.packet_sort_direction == PacketSortDirection::Asc {
+                    PacketSortDirection::Desc
+                } else {
+                    PacketSortDirection::Asc
                 };
             } else {
                 app.packet_sort_column = PacketSortColumn::Size;
-                app.packet_sort_direction = PacketSortDirection::Desc; // Largest first by default
+                app.packet_sort_direction = PacketSortDirection::Asc;
             }
-            app.packet_scroll_offset = 0;
         }
         Char('e') => {
             // Export filtered packets to CSV

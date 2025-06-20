@@ -15,7 +15,8 @@ fn default_frequent_connection_threshold() -> usize {
 
 #[derive(Parser)]
 pub struct Cli {
-    #[arg(long)]
+    // Accepts `--iface` (primary) and `--interface` (legacy alias for backward compatibility)
+    #[arg(short = 'i', long = "iface", alias = "interface")]
     pub iface: Option<String>,
     #[arg(long)]
     pub json: bool,

@@ -92,10 +92,9 @@ pub fn export_packets_to_csv(
     }
 
     // Set export notification with detailed information
-    let full_path = std::path::Path::new(&current_dir).join(&filename);
     let export_msg = format!(
-        "✓ Successfully exported {} packets to:\n{}\n\nFile: {}",
-        packet_count, current_dir, filename
+        "✓ Successfully exported {} packets to file '{}' in {}",
+        packet_count, filename, current_dir
     );
 
     app.export_notification_state = crate::types::NotificationState::Active(export_msg);

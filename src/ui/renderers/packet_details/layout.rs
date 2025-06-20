@@ -257,6 +257,7 @@ fn build_medium_layout<'a>(
         .style(style));
     }
 
+    // Headers
     let header = Row::new(vec![
         Cell::from(Span::styled(
             format!("1.Time{}", get_sort_indicator(app, PacketSortColumn::Timestamp)),
@@ -271,11 +272,11 @@ fn build_medium_layout<'a>(
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
         Cell::from(Span::styled(
-            format!("4.Source{}", get_sort_indicator(app, PacketSortColumn::SourceIp)),
+            format!("4.Source{}", get_combined_sort_indicator(app, PacketSortColumn::SourceIp, PacketSortColumn::SourcePort)),
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
         Cell::from(Span::styled(
-            format!("5.Dest{}", get_sort_indicator(app, PacketSortColumn::DestIp)),
+            format!("5.Dest{}", get_combined_sort_indicator(app, PacketSortColumn::DestIp, PacketSortColumn::DestPort)),
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
         Cell::from(Span::styled(
@@ -285,19 +286,19 @@ fn build_medium_layout<'a>(
     ]);
 
     let constraints = vec![
-        Constraint::Length(12),  // Time
-        Constraint::Length(5),   // Dir
-        Constraint::Length(6),   // Proto
-        Constraint::Percentage(28), // Source
-        Constraint::Percentage(28), // Dest
-        Constraint::Length(10),  // Size
+        Constraint::Length(12),     // Timestamp
+        Constraint::Length(4),      // Direction
+        Constraint::Length(8),      // Protocol
+        Constraint::Percentage(40), // Source
+        Constraint::Percentage(40), // Destination
+        Constraint::Min(8),         // Size
     ];
 
     (rows, header, constraints)
 }
 
 // ============================================================
-// Wide terminal layout (>= 120 chars)
+// Wide terminal layout (> 120 chars)
 // ============================================================
 
 fn build_wide_layout<'a>(
@@ -375,6 +376,7 @@ fn build_wide_layout<'a>(
         .style(style));
     }
 
+    // Headers
     let header = Row::new(vec![
         Cell::from(Span::styled(
             format!("1.Timestamp{}", get_sort_indicator(app, PacketSortColumn::Timestamp)),
@@ -389,27 +391,37 @@ fn build_wide_layout<'a>(
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
         Cell::from(Span::styled(
-            format!("4.Source{}", get_sort_indicator(app, PacketSortColumn::SourceIp)),
+            format!("4.Source IP{}", get_sort_indicator(app, PacketSortColumn::SourceIp)),
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
         Cell::from(Span::styled(
-            format!("5.Destination{}", get_sort_indicator(app, PacketSortColumn::DestIp)),
+            format!("5.Src Port{}", get_sort_indicator(app, PacketSortColumn::SourcePort)),
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
         Cell::from(Span::styled(
-            format!("6.Size{}", get_sort_indicator(app, PacketSortColumn::Size)),
+            format!("6.Destination IP{}", get_sort_indicator(app, PacketSortColumn::DestIp)),
+            Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
+        )),
+        Cell::from(Span::styled(
+            format!("7.Dst Port{}", get_sort_indicator(app, PacketSortColumn::DestPort)),
+            Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
+        )),
+        Cell::from(Span::styled(
+            format!("8.Size{}", get_sort_indicator(app, PacketSortColumn::Size)),
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
     ]);
 
     let constraints = vec![
-        Constraint::Length(15), // Full timestamp
-        Constraint::Length(7),  // Direction
-        Constraint::Length(8),  // Protocol
-        Constraint::Percentage(27), // Source
-        Constraint::Percentage(27), // Destination
-        Constraint::Length(12), // Size
+        Constraint::Length(12),     // Timestamp
+        Constraint::Length(10),     // Direction
+        Constraint::Length(8),      // Protocol
+        Constraint::Percentage(25), // Source IP
+        Constraint::Length(10),     // Source Port
+        Constraint::Percentage(25), // Destination IP
+        Constraint::Length(10),     // Destination Port
+        Constraint::Min(8),         // Size
     ];
 
     (rows, header, constraints)
-} 
+}

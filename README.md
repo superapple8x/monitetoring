@@ -172,9 +172,10 @@ This will:
 ### Direct Usage
 
 ```bash
-sudo monitetoring --interface any
-sudo monitetoring --interface eth0 --json
-sudo monitetoring --interface eth0 --containers
+# Both `--iface` and the legacy `--interface` are accepted. The examples below use the primary flag.
+sudo monitetoring --iface any
+sudo monitetoring --iface eth0 --json
+sudo monitetoring --iface eth0 --containers
 sudo monitetoring --reset
 ```
 
@@ -215,12 +216,12 @@ sudo monitetoring --reset
 Usage: monitetoring [OPTIONS]
 
 Options:
-  -i, --interface <INTERFACE>  Network interface to monitor [default: any]
-  -j, --json                   Output in JSON format instead of TUI
-  -c, --containers             Enable container detection and display
-      --reset                  Reset saved configuration and exit
-  -h, --help                   Print help
-  -V, --version                Print version
+  -i, --iface <IFACE>       Network interface to monitor [default: any] (alias: --interface)
+  -j, --json                Output in JSON format instead of TUI
+  -c, --containers          Enable container detection and display
+      --reset               Reset saved configuration and exit
+  -h, --help                Print help
+  -V, --version             Print version
 ```
 
 ## Terminal UI
@@ -300,7 +301,7 @@ Monitetoring has three main interface modes that you can cycle through using the
 For integration with monitoring systems or scripts:
 
 ```bash
-sudo monitetoring --interface eth0 --json --containers
+sudo monitetoring --iface eth0 --json --containers
 ```
 
 ```json
@@ -409,5 +410,32 @@ If you encounter any issues:
 4. Check the logs for any error messages
 
 For bug reports and feature requests, please use the GitHub issue tracker. 
+
+### "Command not found" when using `sudo`
+
+If you installed Monitetoring with `cargo install monitetoring` the binary is placed in `$HOME/.cargo/bin`, which is usually **not** in the `root` user's `PATH`. As a result `sudo monitetoring` may fail with *command not found* unless you provide the full path.
+
+Solutions:
+
+1. Prefix the command with the full path:
+   ```bash
+   sudo $HOME/.cargo/bin/monitetoring --iface any
+   ```
+
+2. Keep your current `PATH` when escalating privileges:
+   ```bash
+   sudo -E monitetoring --iface any
+   # or
+   sudo env "PATH=$PATH" monitetoring --iface any
+   ```
+
+3. Add Cargo's bin directory to the `secure_path` in `/etc/sudoers` (requires root privileges):
+   ```bash
+   sudo visudo
+   # Add /home/<user>/.cargo/bin to the secure_path setting, e.g.
+   # Defaults    secure_path = /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/<user>/.cargo/bin
+   ```
+
+Any of the above will allow `sudo monitetoring` to be executed without specifying the full path.
 
 

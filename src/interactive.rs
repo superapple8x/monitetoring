@@ -173,8 +173,9 @@ impl NetworkInterface {
         let start_time = Instant::now();
         let mut total_bytes = 0u64;
 
-        // Measure for exactly 5 seconds
-        while start_time.elapsed() < Duration::from_secs(5) {
+        // Measure for exactly 2 seconds
+        const MEASURE_DURATION_SECS: u64 = 2;
+        while start_time.elapsed() < Duration::from_secs(MEASURE_DURATION_SECS) {
             match cap.next_packet() {
                 Ok(packet) => {
                     total_bytes += packet.data.len() as u64;
@@ -340,8 +341,12 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
             .map(NetworkInterface::from_device)
             .collect();
 
-        // Measure traffic on all interfaces for 5 seconds
-        println!("📊 Measuring traffic on interfaces for 5 seconds...");
+        // Measure traffic on all interfaces for 2 seconds
+        const MEASURE_DURATION_SECS: u64 = 2;
+        println!(
+            "📊 Measuring traffic on interfaces for {} seconds...",
+            MEASURE_DURATION_SECS
+        );
         println!("   (This helps identify the busiest interface)");
         println!();
         
@@ -396,7 +401,10 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
         
         println!("   0. Quit");
         println!();
-        println!("🟢 = Interface is up   🔴 = Interface is down   [traffic] = Bytes observed in 5s");
+        println!(
+            "🟢 = Interface is up   🔴 = Interface is down   [traffic] = Bytes observed in {}s",
+            MEASURE_DURATION_SECS
+        );
         println!();
         
         match InputHandler::numeric_choice_prompt("📡 Select interface (number)", 0, interfaces.len())? {
