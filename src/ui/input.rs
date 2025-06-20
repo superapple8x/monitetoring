@@ -511,87 +511,38 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
 
     // Handle search input mode first
     if app.packet_search_mode {
-        match key {
-            Esc => {
-                app.packet_search_mode = false;
-                app.packet_search_input.clear();
-                // Clear search filter
-                if let Some(filter) = &mut app.packet_filter {
-                    filter.search_term = None;
-                    filter.search_regex = None;
-                } else {
-                    app.packet_filter = Some(crate::types::PacketFilter { 
-                        protocol: None, 
-                        direction: None, 
-                        search_term: None,
-                        search_regex: None,
-                    });
-                }
-                app.packet_scroll_offset = 0;
-            }
-            Enter => {
-                use regex::Regex;
-                app.packet_search_mode = false;
-
-                let trimmed = app.packet_search_input.trim();
-
-                let (search_term, search_regex) = if trimmed.is_empty() {
-                    (None, None)
-                } else if trimmed.starts_with("regex:") {
-                    let pattern = &trimmed[6..];
-                    match Regex::new(pattern) {
-                        Ok(re) => (Some(trimmed.to_string()), Some(re)),
-                        Err(_) => (Some(trimmed.to_string()), None), // fallback to no regex if invalid
-                    }
-                } else {
-                    (Some(trimmed.to_lowercase()), None)
-                };
-
-                if let Some(filter) = &mut app.packet_filter {
-                    filter.search_term = search_term;
-                    filter.search_regex = search_regex;
-                } else {
-                    app.packet_filter = Some(crate::types::PacketFilter {
-                        protocol: None,
-                        direction: None,
-                        search_term,
-                        search_regex,
-                    });
-                }
-                app.packet_scroll_offset = 0;
-            }
-            Backspace => {
-                app.packet_search_input.pop();
-            }
-            Char(c) => {
-                app.packet_search_input.push(c);
-            }
-            _ => {}
-        }
-        return false;
+        // return handle_packet_search_keys(app, key);
     }
 
     match key {
-        Esc => {
+        KeyCode::Char('q') | KeyCode::Esc => {
             app.mode = AppMode::Normal;
+            // SOLUTION 3: Force a full redraw when leaving packet details
+            app.force_redraw = true;
+            // Reset notification state when leaving the view to prevent artifacts
+            app.export_notification_state = crate::types::NotificationState::None;
+            return false;
         }
-        Up => {
+        KeyCode::Down | KeyCode::Char('j') => {
+            let filtered_count = app.packet_cache.len();
+            if filtered_count > 0 {
+                let num_packets = if let Some(pid) = app.selected_process {
+                    if let Some(pinfo) = app.stats.get(&pid) {
+                        pinfo.packet_history.len()
+                    } else { 0 }
+                } else { 0 };
+
+                if num_packets > 0 && app.packet_scroll_offset < num_packets - 1 {
+                    app.packet_scroll_offset += 1;
+                }
+            }
+        }
+        KeyCode::Up => {
             if app.packet_scroll_offset > 0 {
                 app.packet_scroll_offset -= 1;
             }
         }
-        Down => {
-            let num_packets = if let Some(pid) = app.selected_process {
-                if let Some(pinfo) = app.stats.get(&pid) {
-                    pinfo.packet_history.len()
-                } else { 0 }
-            } else { 0 };
-
-            if num_packets > 0 && app.packet_scroll_offset < num_packets - 1 {
-                 app.packet_scroll_offset += 1;
-            }
-        }
-        PageUp => {
+        KeyCode::PageUp => {
             let page = app.packet_visible_rows.max(1);
             if app.packet_scroll_offset >= page {
                 app.packet_scroll_offset -= page;
@@ -599,7 +550,7 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
                 app.packet_scroll_offset = 0;
             }
         }
-        PageDown => {
+        KeyCode::PageDown => {
             let num_packets = if let Some(pid) = app.selected_process {
                 app.stats.get(&pid).map(|p| p.packet_history.len()).unwrap_or(0)
             } else { 0 };

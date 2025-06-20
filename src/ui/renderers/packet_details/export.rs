@@ -101,6 +101,5 @@ pub fn export_packets_to_csv(
     app.export_notification_state = crate::types::NotificationState::Active(export_msg);
     app.export_notification_time = Some(Instant::now());
 
-    eprintln!("Exported {} packets to: {}", packet_count, full_path.display());
     Ok(())
 } 
