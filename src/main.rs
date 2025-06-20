@@ -133,7 +133,7 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
                         (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)), None)
                     }
                     Ok(result) => {
-                        let stderr_msg = String::from_utf8_lossy(&result.stderr);
+                        let _stderr_msg = String::from_utf8_lossy(&result.stderr);
                         (false, Some(format!("❌ Failed to kill {} (PID {}): taskkill command failed", name, pid)), None)
                     }
                     Err(e) => {

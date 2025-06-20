@@ -5,6 +5,14 @@ use std::fs;
 use std::path::PathBuf;
 use std::io;
 
+fn default_large_packet_threshold() -> usize {
+    100_000
+}
+
+fn default_frequent_connection_threshold() -> usize {
+    20
+}
+
 #[derive(Parser)]
 pub struct Cli {
     #[arg(long)]
@@ -26,6 +34,10 @@ pub struct SavedConfig {
     pub show_total_columns: bool,
     #[serde(default)]
     pub alerts: Vec<Alert>,
+    #[serde(default = "default_large_packet_threshold")]
+    pub large_packet_threshold: usize,
+    #[serde(default = "default_frequent_connection_threshold")]
+    pub frequent_connection_threshold: usize,
 }
 
 pub fn get_config_path() -> Result<PathBuf, io::Error> {

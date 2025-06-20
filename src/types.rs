@@ -264,6 +264,7 @@ pub struct App {
     // Settings mode fields
     pub settings_notification: Option<String>, // Notification for settings mode
     pub settings_notification_time: Option<Instant>, // When settings notification was set
+    pub settings_selected_option: usize, // Which setting is currently selected
     // Packet details view state
     pub packet_scroll_offset: usize,
     pub packet_filter: Option<PacketFilter>,
@@ -331,6 +332,7 @@ impl App {
             // Settings mode fields
             settings_notification: None, // Notification for settings mode
             settings_notification_time: None, // When settings notification was set
+            settings_selected_option: 0,
             // Packet details view state
             packet_scroll_offset: 0,
             packet_filter: None,

@@ -1,7 +1,5 @@
 #[cfg(target_os = "windows")]
 use std::process::Command;
-#[cfg(target_os = "windows")]
-use std::panic;
 
 #[derive(Debug, Clone)]
 pub struct DependencyInfo {

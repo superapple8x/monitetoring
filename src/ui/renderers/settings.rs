@@ -70,7 +70,7 @@ fn render_settings_content(f: &mut Frame, app: &App, area: ratatui::layout::Rect
 /// Render current configuration information
 fn render_current_config(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     let config_info = if let Some(config) = load_config() {
-        vec![
+        let mut lines = vec![
             Line::from(vec![
                 Span::styled("📡 Interface: ", Style::default().fg(Color::Cyan)),
                 Span::raw(config.interface.clone()),
@@ -92,7 +92,31 @@ fn render_current_config(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
                 Span::styled("🔔 Active alerts: ", Style::default().fg(Color::Yellow)),
                 Span::raw(format!("{}", config.alerts.len())),
             ]),
-        ]
+            Line::from(""),
+            Line::from("Highlighting thresholds:"),
+        ];
+
+        let large_packet_style = if app.settings_selected_option == 0 {
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  Large packet: {} bytes", config.large_packet_threshold),
+            large_packet_style,
+        )));
+
+        let frequent_conn_style = if app.settings_selected_option == 1 {
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  Frequent connection: {} packets", config.frequent_connection_threshold),
+            frequent_conn_style,
+        )));
+
+        lines
     } else {
         vec![
             Line::from(Span::styled(
@@ -121,6 +145,15 @@ fn render_current_config(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
 /// Render available actions
 fn render_available_actions(f: &mut Frame, area: ratatui::layout::Rect) {
     let actions = vec![
+        Line::from(vec![
+            Span::styled("↑/↓", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::raw(" - Navigate settings"),
+        ]),
+        Line::from(vec![
+            Span::styled("←/→", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::raw(" - Adjust selected setting"),
+        ]),
+        Line::from(""),
         Line::from(vec![
             Span::styled("r", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
             Span::raw(" - Remove saved configuration"),

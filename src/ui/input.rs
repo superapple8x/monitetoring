@@ -427,6 +427,61 @@ fn handle_settings_mode_keys(app: &mut App, key: KeyCode) -> bool {
             // Cycle from Settings back to Main mode
             app.mode = AppMode::Normal;
         }
+        KeyCode::Up => {
+            if app.settings_selected_option > 0 {
+                app.settings_selected_option -= 1;
+            }
+        }
+        KeyCode::Down => {
+            // We have 2 settings for now
+            if app.settings_selected_option < 1 {
+                app.settings_selected_option += 1;
+            }
+        }
+        KeyCode::Left => {
+            if let Some(mut config) = crate::config::load_config() {
+                match app.settings_selected_option {
+                    0 => {
+                        config.large_packet_threshold = config.large_packet_threshold.saturating_sub(1000);
+                    }
+                    1 => {
+                        config.frequent_connection_threshold = config.frequent_connection_threshold.saturating_sub(1);
+                    }
+                    _ => {}
+                }
+                if crate::config::save_config(&config).is_ok() {
+                    app.settings_notification = Some("✅ Setting updated.".to_string());
+                } else {
+                    app.settings_notification = Some("❌ Failed to save setting.".to_string());
+                }
+                app.settings_notification_time = Some(std::time::Instant::now());
+            } else {
+                app.settings_notification = Some("ℹ️ No saved configuration to update.".to_string());
+                app.settings_notification_time = Some(std::time::Instant::now());
+            }
+        }
+        KeyCode::Right => {
+            if let Some(mut config) = crate::config::load_config() {
+                match app.settings_selected_option {
+                    0 => {
+                        config.large_packet_threshold = config.large_packet_threshold.saturating_add(1000);
+                    }
+                    1 => {
+                        config.frequent_connection_threshold = config.frequent_connection_threshold.saturating_add(1);
+                    }
+                    _ => {}
+                }
+                 if crate::config::save_config(&config).is_ok() {
+                    app.settings_notification = Some("✅ Setting updated.".to_string());
+                } else {
+                    app.settings_notification = Some("❌ Failed to save setting.".to_string());
+                }
+                app.settings_notification_time = Some(std::time::Instant::now());
+            } else {
+                app.settings_notification = Some("ℹ️ No saved configuration to update.".to_string());
+                app.settings_notification_time = Some(std::time::Instant::now());
+            }
+        }
         KeyCode::Char('r') => {
             // Reset configuration
             match crate::config::reset_config() {

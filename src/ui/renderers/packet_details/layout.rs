@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use crate::types::{App, PacketDirection, PacketSortColumn};
+use crate::config;
 
 use super::utils::*;
 
@@ -17,12 +18,44 @@ pub fn build_responsive_table_data<'a>(
     end_idx: usize,
     terminal_width: u16,
 ) -> (Vec<Row<'a>>, Row<'a>, Vec<Constraint>) {
+    let (large_packet_threshold, frequent_connection_threshold) =
+        if let Some(config) = config::load_config() {
+            (
+                config.large_packet_threshold,
+                config.frequent_connection_threshold,
+            )
+        } else {
+            // Fallback to defaults if config fails to load
+            (100_000, 20)
+        };
+
     if terminal_width < NARROW_TERMINAL_THRESHOLD {
-        build_narrow_layout(app, process_info, scroll_offset, end_idx)
+        build_narrow_layout(
+            app,
+            process_info,
+            scroll_offset,
+            end_idx,
+            large_packet_threshold,
+            frequent_connection_threshold,
+        )
     } else if terminal_width < WIDE_TERMINAL_THRESHOLD {
-        build_medium_layout(app, process_info, scroll_offset, end_idx)
+        build_medium_layout(
+            app,
+            process_info,
+            scroll_offset,
+            end_idx,
+            large_packet_threshold,
+            frequent_connection_threshold,
+        )
     } else {
-        build_wide_layout(app, process_info, scroll_offset, end_idx)
+        build_wide_layout(
+            app,
+            process_info,
+            scroll_offset,
+            end_idx,
+            large_packet_threshold,
+            frequent_connection_threshold,
+        )
     }
 }
 
@@ -35,6 +68,8 @@ fn build_narrow_layout<'a>(
     process_info: &'a crate::types::ProcessInfo,
     scroll_offset: usize,
     end_idx: usize,
+    large_packet_threshold: usize,
+    frequent_connection_threshold: usize,
 ) -> (Vec<Row<'a>>, Row<'a>, Vec<Constraint>) {
     // Get base timestamp for relative timing (first packet in current view)
     let base_time = if !process_info.packet_history.is_empty() {
@@ -85,7 +120,7 @@ fn build_narrow_layout<'a>(
             p.dst_port,
             p.direction,
         );
-        let frequent = conn_counts.get(&conn_key).copied().unwrap_or(0) > FREQUENT_CONNECTION_THRESHOLD;
+        let frequent = conn_counts.get(&conn_key).copied().unwrap_or(0) > frequent_connection_threshold;
         let connection_cell = if frequent {
             Cell::from(Span::styled(connection_summary, Style::default().fg(Color::LightCyan)))
         } else {
@@ -93,7 +128,7 @@ fn build_narrow_layout<'a>(
         };
 
         // Size cell highlight
-        let size_cell = if p.size > LARGE_PACKET_THRESHOLD_BYTES {
+        let size_cell = if p.size > large_packet_threshold {
             Cell::from(Span::styled(p.cached_size.clone(), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)))
         } else {
             Cell::from(p.cached_size.clone())
@@ -148,6 +183,8 @@ fn build_medium_layout<'a>(
     process_info: &'a crate::types::ProcessInfo,
     scroll_offset: usize,
     end_idx: usize,
+    large_packet_threshold: usize,
+    frequent_connection_threshold: usize,
 ) -> (Vec<Row<'a>>, Row<'a>, Vec<Constraint>) {
     let slice = &app.packet_cache[scroll_offset..end_idx];
     let mut conn_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
@@ -193,7 +230,7 @@ fn build_medium_layout<'a>(
             p.dst_port,
             p.dst_ip.to_string().starts_with("127.0.0.1") || p.dst_ip.to_string().starts_with("::1"),
         );
-        let frequent = conn_counts.get(&conn_key).copied().unwrap_or(0) > FREQUENT_CONNECTION_THRESHOLD;
+        let frequent = conn_counts.get(&conn_key).copied().unwrap_or(0) > frequent_connection_threshold;
         let src_cell = if frequent {
             Cell::from(Span::styled(enhanced_src, Style::default().fg(Color::LightCyan)))
         } else {
@@ -205,7 +242,7 @@ fn build_medium_layout<'a>(
             Cell::from(enhanced_dst)
         };
 
-        let size_cell = if p.size > LARGE_PACKET_THRESHOLD_BYTES {
+        let size_cell = if p.size > large_packet_threshold {
             Cell::from(Span::styled(p.cached_size.clone(), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)))
         } else {
             Cell::from(p.cached_size.clone())
@@ -270,6 +307,8 @@ fn build_wide_layout<'a>(
     process_info: &'a crate::types::ProcessInfo,
     scroll_offset: usize,
     end_idx: usize,
+    large_packet_threshold: usize,
+    frequent_connection_threshold: usize,
 ) -> (Vec<Row<'a>>, Row<'a>, Vec<Constraint>) {
     let slice = &app.packet_cache[scroll_offset..end_idx];
     let mut conn_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
@@ -315,7 +354,7 @@ fn build_wide_layout<'a>(
             p.dst_ip.to_string().starts_with("127.0.0.1") || p.dst_ip.to_string().starts_with("::1"),
         );
 
-        let frequent = conn_counts.get(&conn_key).copied().unwrap_or(0) > FREQUENT_CONNECTION_THRESHOLD;
+        let frequent = conn_counts.get(&conn_key).copied().unwrap_or(0) > frequent_connection_threshold;
         let src_cell = if frequent {
             Cell::from(Span::styled(enhanced_src, Style::default().fg(Color::LightCyan)))
         } else {
@@ -327,7 +366,7 @@ fn build_wide_layout<'a>(
             Cell::from(enhanced_dst)
         };
 
-        let size_cell = if p.size > LARGE_PACKET_THRESHOLD_BYTES {
+        let size_cell = if p.size > large_packet_threshold {
             Cell::from(Span::styled(p.cached_size.clone(), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)))
         } else {
             Cell::from(p.cached_size.clone())

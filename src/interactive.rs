@@ -290,6 +290,8 @@ fn save_user_config(interface: &str, json_mode: bool, containers_mode: bool, sho
         containers_mode,
         show_total_columns,
         alerts: vec![], // Initialize with no alerts
+        large_packet_threshold: 100_000,
+        frequent_connection_threshold: 20,
     };
     
     match save_config(&config) {

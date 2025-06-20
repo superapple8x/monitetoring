@@ -9,10 +9,6 @@ use crate::types::{App, PacketSortColumn, PacketSortDirection, PacketDirection};
 pub const NARROW_TERMINAL_THRESHOLD: u16 = 80;
 pub const WIDE_TERMINAL_THRESHOLD: u16 = 120;
 
-/// Thresholds for visual highlights
-pub const LARGE_PACKET_THRESHOLD_BYTES: usize = 100_000; // Highlight packets larger than 100 KB
-pub const FREQUENT_CONNECTION_THRESHOLD: usize = 20;     // Highlight connections with > 20 packets in current viewport
-
 // =====================
 // Port helpers
 // =====================
