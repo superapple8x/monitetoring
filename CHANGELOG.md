@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.0] - 2025-06-21
+
+### Added
+- **Packet History and Details View**: Introduced a new dedicated view to inspect individual packets for each process, offering deep-dive analysis capabilities.
+- **Advanced Sorting and Filtering**: The packet details view now supports sorting by any column (timestamp, direction, protocol, etc.) and filtering with plain text or powerful regex patterns (e.g., `/regex:<pattern>`).
+- **Performance-Oriented Caching**: Implemented multiple caching layers for packet data, pre-computed strings, and rendering styles to deliver a smooth, high-performance UI, even with thousands of packets.
+- **Configurable Highlighting**: Users can now set custom thresholds in the settings menu to visually highlight large packets and frequent connections.
+- **Service Name Resolution**: Network ports are now displayed with their corresponding service names (e.g., port 443 is shown as HTTPS) for better context.
+- **Enhanced Export Notifications**: The UI now provides clear, persistent feedback on the status of packet data exports (success or failure).
+
+### Changed
+- **Performance Overhaul**: Re-architected data handling with virtual scrolling and optimized rendering logic, eliminating lag and ensuring a highly responsive interface.
+- **Improved UI Readability**: The packet details view now features connection grouping, directional color-coding (light blue for sent, light green for received), and a responsive layout that adapts to different terminal widths.
+- **Refined Key Event Management**: Streamlined keyboard navigation and commands within the packet details mode for a more intuitive user experience.
+
 ## [0.2.1] - 2025-06-17
 
 ### Added

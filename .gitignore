@@ -8,3 +8,4 @@ src/ui/renderers/packet_details.rs28183
 src/main.rs105
 ENHANCED_PACKET_DETAILS_COMPLETE.md
 COMPLETE_PACKET_DETAILS_IMPLEMENTATION_REPORT.md
+release/
