@@ -94,8 +94,12 @@ fn build_narrow_layout<'a>(
         let p = &process_info.packet_history[packet_idx];
         let conn_key = ConnKey::from_packet(p);
 
-        // Get pre-computed row style from the render cache
-        let row_style = app.packet_render_cache[scroll_offset + i].row_style;
+        // Get pre-computed row style from the render cache and enhance it
+        let mut style = app.packet_render_cache[scroll_offset + i].row_style;
+        style = match p.direction {
+            PacketDirection::Sent => style.fg(Color::LightBlue),
+            PacketDirection::Received => style.fg(Color::LightGreen),
+        };
 
         // Timestamp (relative)
         let timestamp = format_relative_timestamp(p.timestamp, base_time, true);
@@ -136,7 +140,7 @@ fn build_narrow_layout<'a>(
             connection_cell,
             size_cell,
         ])
-        .style(row_style);
+        .style(style);
         rows.push(row);
     }
 
@@ -196,7 +200,11 @@ fn build_medium_layout<'a>(
         let p = &process_info.packet_history[packet_idx];
         let conn_key = ConnKey::from_packet(p);
 
-        let row_style = app.packet_render_cache[scroll_offset + i].row_style;
+        let mut style = app.packet_render_cache[scroll_offset + i].row_style;
+        style = match p.direction {
+            PacketDirection::Sent => style.fg(Color::LightBlue),
+            PacketDirection::Received => style.fg(Color::LightGreen),
+        };
 
         let timestamp = if p.cached_ts.len() > 12 {
             &p.cached_ts[..12]
@@ -246,7 +254,7 @@ fn build_medium_layout<'a>(
             dst_cell,
             size_cell,
         ])
-        .style(row_style));
+        .style(style));
     }
 
     let header = Row::new(vec![
