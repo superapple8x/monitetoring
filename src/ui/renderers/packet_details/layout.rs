@@ -7,6 +7,7 @@ use ratatui::{
 
 use crate::types::{App, PacketDirection, PacketSortColumn};
 use crate::config;
+use super::cache::ConnKey;
 
 use super::utils::*;
 
@@ -80,26 +81,21 @@ fn build_narrow_layout<'a>(
 
     // Build frequency map for connection counts within the visible slice
     let slice = &app.packet_cache[scroll_offset..end_idx];
-    let mut conn_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut conn_counts: std::collections::HashMap<ConnKey, usize> = std::collections::HashMap::new();
     for &packet_idx in slice {
         let p = &process_info.packet_history[packet_idx];
-        let key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
+        let key = ConnKey::from_packet(p);
         *conn_counts.entry(key).or_insert(0) += 1;
     }
 
     let mut rows: Vec<Row> = Vec::with_capacity(slice.len());
-    let mut last_conn_key: Option<String> = None;
-    let mut bg_toggle = false;
 
-    for &packet_idx in slice {
+    for (i, &packet_idx) in slice.iter().enumerate() {
         let p = &process_info.packet_history[packet_idx];
-        let conn_key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
-        if last_conn_key.as_ref().map(|k| k != &conn_key).unwrap_or(true) {
-            bg_toggle = !bg_toggle;
-            last_conn_key = Some(conn_key.clone());
-        }
+        let conn_key = ConnKey::from_packet(p);
 
-        let row_style = if bg_toggle { Style::default() } else { Style::default().bg(Color::DarkGray) };
+        // Get pre-computed row style from the render cache
+        let row_style = app.packet_render_cache[scroll_offset + i].row_style;
 
         // Timestamp (relative)
         let timestamp = format_relative_timestamp(p.timestamp, base_time, true);
@@ -187,26 +183,20 @@ fn build_medium_layout<'a>(
     frequent_connection_threshold: usize,
 ) -> (Vec<Row<'a>>, Row<'a>, Vec<Constraint>) {
     let slice = &app.packet_cache[scroll_offset..end_idx];
-    let mut conn_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut conn_counts: std::collections::HashMap<ConnKey, usize> = std::collections::HashMap::new();
     for &packet_idx in slice {
         let pkt = &process_info.packet_history[packet_idx];
-        let key = format!("{}:{}-{}:{}-{}", pkt.src_ip, pkt.src_port, pkt.dst_ip, pkt.dst_port, pkt.protocol);
+        let key = ConnKey::from_packet(pkt);
         *conn_counts.entry(key).or_insert(0) += 1;
     }
 
     let mut rows: Vec<Row> = Vec::with_capacity(slice.len());
-    let mut last_conn_key: Option<String> = None;
-    let mut bg_toggle = false;
 
-    for &packet_idx in slice {
+    for (i, &packet_idx) in slice.iter().enumerate() {
         let p = &process_info.packet_history[packet_idx];
-        let conn_key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
-        if last_conn_key.as_ref().map(|k| k != &conn_key).unwrap_or(true) {
-            bg_toggle = !bg_toggle;
-            last_conn_key = Some(conn_key.clone());
-        }
+        let conn_key = ConnKey::from_packet(p);
 
-        let row_style = if bg_toggle { Style::default() } else { Style::default().bg(Color::DarkGray) };
+        let row_style = app.packet_render_cache[scroll_offset + i].row_style;
 
         let timestamp = if p.cached_ts.len() > 12 {
             &p.cached_ts[..12]
@@ -311,26 +301,20 @@ fn build_wide_layout<'a>(
     frequent_connection_threshold: usize,
 ) -> (Vec<Row<'a>>, Row<'a>, Vec<Constraint>) {
     let slice = &app.packet_cache[scroll_offset..end_idx];
-    let mut conn_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut conn_counts: std::collections::HashMap<ConnKey, usize> = std::collections::HashMap::new();
     for &idx in slice {
         let p = &process_info.packet_history[idx];
-        let key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
+        let key = ConnKey::from_packet(p);
         *conn_counts.entry(key).or_insert(0) += 1;
     }
 
     let mut rows: Vec<Row> = Vec::with_capacity(slice.len());
-    let mut last_conn_key: Option<String> = None;
-    let mut bg_toggle = false;
 
-    for &packet_idx in slice {
+    for (i, &packet_idx) in slice.iter().enumerate() {
         let p = &process_info.packet_history[packet_idx];
-        let conn_key = format!("{}:{}-{}:{}-{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port, p.protocol);
-        if last_conn_key.as_ref().map(|k| k != &conn_key).unwrap_or(true) {
-            bg_toggle = !bg_toggle;
-            last_conn_key = Some(conn_key.clone());
-        }
+        let conn_key = ConnKey::from_packet(p);
 
-        let mut style = if bg_toggle { Style::default() } else { Style::default().bg(Color::DarkGray) };
+        let mut style = app.packet_render_cache[scroll_offset + i].row_style;
         style = match p.direction {
             PacketDirection::Sent => style.fg(Color::LightBlue),
             PacketDirection::Received => style.fg(Color::LightGreen),

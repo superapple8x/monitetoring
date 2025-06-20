@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 use ratatui::style::Color;
 use regex;
+use crate::ui::renderers::packet_details::cache::PacketRenderCacheItem;
 
 // Process cleanup configuration
 pub const PROCESS_CLEANUP_INTERVAL_SECS: u64 = 5; // Check for dead processes every 5 seconds
@@ -282,6 +283,7 @@ pub struct App {
     // Packet cache for performance
     pub packet_cache: Vec<usize>, // indices into packet_history after filtering & sorting
     pub packet_cache_meta: Option<PacketCacheMeta>,
+    pub packet_render_cache: Vec<PacketRenderCacheItem>, // NEW: pre-computed render info
 }
 
 impl App {
@@ -349,6 +351,7 @@ impl App {
             // Packet cache initialisation
             packet_cache: Vec::new(),
             packet_cache_meta: None,
+            packet_render_cache: Vec::new(),
         }
     }
 

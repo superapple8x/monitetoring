@@ -1,4 +1,36 @@
 use crate::types::{App, PacketCacheMeta, PacketSortColumn, PacketSortDirection};
+use ratatui::style::{Color, Style};
+
+/// A lightweight, hashable key to represent a unique connection.
+/// Much more efficient than a formatted string.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ConnKey {
+    pub src_ip: std::net::IpAddr,
+    pub src_port: u16,
+    pub dst_ip: std::net::IpAddr,
+    pub dst_port: u16,
+    pub protocol: u8,
+}
+
+impl ConnKey {
+    pub fn from_packet(p: &crate::types::PacketInfo) -> Self {
+        Self {
+            src_ip: p.src_ip,
+            src_port: p.src_port,
+            dst_ip: p.dst_ip,
+            dst_port: p.dst_port,
+            protocol: p.protocol,
+        }
+    }
+}
+
+/// Holds pre-computed rendering information for a single packet.
+/// This cache is rebuilt only when filters/sorting changes.
+#[derive(Debug, Clone)]
+pub struct PacketRenderCacheItem {
+    /// The style for the entire row, primarily for zebra-striping.
+    pub row_style: Style,
+}
 
 /// Ensure that `app.packet_cache` contains indices of packets that satisfy the
 /// current filter & sort settings. Rebuilds the vector only when something has
@@ -95,6 +127,32 @@ pub fn ensure_packet_cache(app: &mut App, pid: i32) {
         sort_direction: app.packet_sort_direction,
         history_len,
     });
+
+    // --- NEW: Build the render cache based on the newly sorted indices ---
+    let mut render_cache = Vec::with_capacity(app.packet_cache.len());
+    let mut last_conn_key: Option<ConnKey> = None;
+    let mut bg_toggle = false;
+
+    for &packet_idx in &app.packet_cache {
+        let p = &process_info.packet_history[packet_idx];
+        let conn_key = ConnKey::from_packet(p);
+
+        // Determine if this packet belongs to a new connection group
+        if last_conn_key.as_ref().map_or(true, |k| k != &conn_key) {
+            bg_toggle = !bg_toggle;
+            last_conn_key = Some(conn_key);
+        }
+
+        let row_style = if bg_toggle {
+            Style::default()
+        } else {
+            Style::default().bg(Color::DarkGray)
+        };
+
+        render_cache.push(PacketRenderCacheItem { row_style });
+    }
+
+    app.packet_render_cache = render_cache;
 }
 
 /// Compare PacketFilter instances manually since regex::Regex doesn't implement PartialEq
