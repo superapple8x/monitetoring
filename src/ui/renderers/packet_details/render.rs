@@ -1,4 +1,4 @@
-use ratatui::{Frame, layout::{Constraint, Direction, Layout}, widgets::{Block, Borders, Paragraph, Table}, style::{Style, Color}, text::{Span, Line}};
+use ratatui::{Frame, layout::{Constraint, Direction, Layout}, widgets::{Block, Borders, Paragraph, Table, Wrap}, style::{Style, Color}, text::{Span, Line}};
 
 use crate::types::{App, PacketDirection, PacketSortColumn, PacketSortDirection};
 
@@ -9,7 +9,23 @@ pub fn render(f: &mut Frame, app: &mut App) {
     let area = f.size();
     let terminal_width = area.width;
 
-    // Fixed footer approach: always allocate space for export notification to avoid layout jumps
+    // Dynamically calculate export footer height so long paths are not truncated
+    let base_footer_height: u16 = 4; // minimum height (matches previous fixed size)
+    let export_footer_height: u16 = match &app.export_notification_state {
+        crate::types::NotificationState::Active(msg) => {
+            // Rough estimate of wrapped line count (leave 4 chars for borders/padding)
+            let usable_width = terminal_width.saturating_sub(4) as usize;
+            if usable_width == 0 {
+                base_footer_height
+            } else {
+                let lines_needed = (msg.len() + usable_width - 1) / usable_width; // ceil division
+                (lines_needed as u16 + 2).max(base_footer_height) // +2 for block borders
+            }
+        }
+        _ => base_footer_height,
+    };
+
+    // Fixed footer approach with dynamic height to avoid layout jumps while showing full path
     let chunks = if app.packet_search_mode {
         Layout::default()
             .direction(Direction::Vertical)
@@ -17,7 +33,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
                 Constraint::Length(3), // Status/help line
                 Constraint::Length(3), // Search input bar
                 Constraint::Min(0),    // Main table
-                Constraint::Length(4), // Export notification (ALWAYS allocated)
+                Constraint::Length(export_footer_height), // Export notification (dynamic)
             ])
             .split(area)
     } else {
@@ -26,7 +42,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             .constraints([
                 Constraint::Length(3), // Status/help line
                 Constraint::Min(0),    // Main table
-                Constraint::Length(4), // Export notification (ALWAYS allocated)
+                Constraint::Length(export_footer_height), // Export notification (dynamic)
             ])
             .split(area)
     };
@@ -197,6 +213,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
         crate::types::NotificationState::Active(export_msg) => {
             let export_notification = Paragraph::new(export_msg.clone())
                 .style(Style::default().fg(Color::Green))
+                .wrap(Wrap { trim: true })
                 .block(Block::default().title("Export Status").borders(Borders::ALL).border_style(Style::default().fg(Color::Green)));
             f.render_widget(export_notification, chunks[export_notification_index]);
         }

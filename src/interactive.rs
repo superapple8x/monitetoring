@@ -138,14 +138,6 @@ impl NetworkInterface {
         }
     }
 
-    /// Returns true for pcap pseudo-devices that **do not** provide
-    /// per-process traffic mapping ("any", "nfqueue…", "usbmon…").
-    ///
-    /// ⚠️  IMPORTANT: these devices purposely receive *no* recommended-interface
-    /// badge and are sorted after real NICs so users aren't misled.
-    /// Changing this method—or the sorting code below—can cause the
-    /// interactive setup to pick "any", resulting in **zero traffic shown**
-    /// in the main UI.  Make sure to test on Linux before modifying.
     fn is_pseudo(&self) -> bool {
         matches!(self.name.as_str(), "any") ||
         self.name.starts_with("nfqueue") ||
@@ -358,9 +350,26 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
             .map(NetworkInterface::from_device)
             .collect();
 
-        // Measure traffic on all interfaces for 5 seconds
+        // ===== TRAFFIC MEASUREMENT SECTION =====
+        // CRITICAL: This section measures network traffic on interfaces to help users
+        // identify the busiest interface. The implementation is carefully designed to:
+        // 1. Never block longer than MEASURE_DURATION_SECS + OPEN_GRACE_SECS (6s total)
+        // 2. Allow users to skip measurement with 'S' key
+        // 3. Handle slow interface opens that can take 100-500ms each on Linux
+        //
+        // DEVELOPER WARNING: Modifying this section can cause:
+        // - Interactive mode hanging for >10s when no traffic present
+        // - Traffic measurements returning zero due to timing issues
+        // - User interface becoming unresponsive
+        //
+        // Key timing considerations:
+        // - Each worker thread does: open interface (~100-500ms) + measure for 5s + send result
+        // - Main thread waits maximum 6s total (5s measurement + 1s grace for opens)
+        // - If interface opens are slow, results may arrive after main thread timeout
+        // - OPEN_GRACE_SECS compensates for typical interface open delays
+        
         const MEASURE_DURATION_SECS: u64 = 5;
-        const OPEN_GRACE_SECS: u64 = 1; // Extra time for slow interface opens
+        const OPEN_GRACE_SECS: u64 = 1; // Extra time for slow interface opens on Linux
         let deadline = Instant::now() + Duration::from_secs(MEASURE_DURATION_SECS + OPEN_GRACE_SECS);
         println!(
             "📊 Measuring traffic on interfaces for {} seconds…",
@@ -370,7 +379,8 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
         println!("   (This helps identify the busiest interface)");
         println!();
         
-        // Use threading to measure multiple interfaces concurrently
+        // Spawn worker threads to measure each interface concurrently
+        // Each thread: opens interface → samples for MEASURE_DURATION_SECS → sends result
         let (tx, rx) = mpsc::channel();
         for interface in &mut interfaces {
             if interface.is_up {
@@ -392,10 +402,12 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
 
         drop(tx); // Close sending side in main thread
 
-        // Collect results with overall timeout
+        // Collect results with hard deadline to prevent hanging
+        // Main thread waits max 6s regardless of worker thread status
         let mut traffic_results: HashMap<String, u64> = HashMap::new();
         loop {
-            // Allow user to skip measurement with 's' key
+            // Allow user to skip measurement early with 's' key
+            // This provides immediate escape if user doesn't want to wait
             if event::poll(Duration::from_millis(0)).unwrap_or(false) {
                 if let Ok(Event::Key(k)) = event::read() {
                     if matches!(k.code, KeyCode::Char('s') | KeyCode::Char('S')) {
@@ -430,15 +442,8 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
             }
         }
         
-        // Custom sorting:
-        // 1. Real NICs first, pseudo devices (see is_pseudo) last.
-        // 2. Among those, up interfaces before down ones.
-        // 3. Finally sort by observed traffic (desc).
-        //
-        // ⚠️  Be careful when changing this order: moving pseudo devices to
-        // the top or marking them as "recommended" will break the first-run
-        // experience because selecting "any" prevents per-process
-        // statistics.
+        // Sort interfaces: real interfaces first, pseudo ("any"/"nfqueue"/"usbmon") last,
+        // then by up/down status and finally by traffic bytes.
         interfaces.sort_by(|a, b| {
             use std::cmp::Ordering::*;
             match (a.is_pseudo(), b.is_pseudo()) {

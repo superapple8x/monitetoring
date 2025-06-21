@@ -376,7 +376,7 @@ fn build_wide_layout<'a>(
         .style(style));
     }
 
-    // Headers
+    // Headers  (removed separate port columns to match data cells)
     let header = Row::new(vec![
         Cell::from(Span::styled(
             format!("1.Timestamp{}", get_sort_indicator(app, PacketSortColumn::Timestamp)),
@@ -395,19 +395,11 @@ fn build_wide_layout<'a>(
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
         Cell::from(Span::styled(
-            format!("5.Src Port{}", get_sort_indicator(app, PacketSortColumn::SourcePort)),
+            format!("5.Destination IP{}", get_sort_indicator(app, PacketSortColumn::DestIp)),
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
         Cell::from(Span::styled(
-            format!("6.Destination IP{}", get_sort_indicator(app, PacketSortColumn::DestIp)),
-            Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
-        )),
-        Cell::from(Span::styled(
-            format!("7.Dst Port{}", get_sort_indicator(app, PacketSortColumn::DestPort)),
-            Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
-        )),
-        Cell::from(Span::styled(
-            format!("8.Size{}", get_sort_indicator(app, PacketSortColumn::Size)),
+            format!("6.Size{}", get_sort_indicator(app, PacketSortColumn::Size)),
             Style::default().add_modifier(Modifier::BOLD).fg(Color::Green),
         )),
     ]);
@@ -416,10 +408,8 @@ fn build_wide_layout<'a>(
         Constraint::Length(12),     // Timestamp
         Constraint::Length(10),     // Direction
         Constraint::Length(8),      // Protocol
-        Constraint::Percentage(25), // Source IP
-        Constraint::Length(10),     // Source Port
-        Constraint::Percentage(25), // Destination IP
-        Constraint::Length(10),     // Destination Port
+        Constraint::Percentage(40), // Source IP
+        Constraint::Percentage(40), // Destination IP
         Constraint::Min(8),         // Size
     ];
 
