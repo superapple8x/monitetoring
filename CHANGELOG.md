@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.1] - 2025-06-21
+
+### Added
+- Introduced an automatic setup prompt on the first run to help users configure system-wide `sudo` access easily.
+- Added version information to the command-line interface.
+
+### Changed
+- The command-line flag for specifying a network interface has been changed from `--interface` to `--iface` for conciseness. The legacy `--interface` flag is retained for backward compatibility.
+- The traffic measurement duration for interface selection was adjusted to 5 seconds for better accuracy.
+- The layout of the packet details view was updated to consolidate header columns for improved readability.
+- The footer for export notifications now has a dynamic height to prevent UI jumps and ensure messages are fully visible.
+
+### Improved
+- The packet sorting logic in the UI has been refined for a more consistent user experience.
+- Post-installation messages now provide clearer instructions for setting up system-wide access.
+- Help messages for command-line arguments have been enhanced for better clarity.
+- The installation script now provides more informative output to guide users.
+
 ## [0.3.0] - 2025-06-21
 
 ### Added
