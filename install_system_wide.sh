@@ -33,8 +33,8 @@ fi
 # Check if system binary already exists
 if [ -f "$SYSTEM_BIN" ]; then
     echo "📋 System-wide installation already exists at: $SYSTEM_BIN"
-    echo "   Current version: $(sudo $SYSTEM_BIN --version 2>/dev/null || echo 'unknown')"
-    echo "   Cargo version:   $($CARGO_BIN --version)"
+    echo "   Current version: $(sudo $SYSTEM_BIN --version 2>/dev/null || echo 'unknown (older version)')"
+    echo "   Cargo version:   $($CARGO_BIN --version 2>/dev/null || echo 'unknown')"
     echo
     
     read -p "🔄 Update system-wide installation? [Y/n]: " -n 1 -r
@@ -47,29 +47,28 @@ if [ -f "$SYSTEM_BIN" ]; then
 fi
 
 # Create the symlink
-echo "🔗 Creating system-wide symlink..."
+echo "🔗 Setting up system-wide access..."
 if sudo ln -sf "$CARGO_BIN" "$SYSTEM_BIN"; then
-    echo "✅ Successfully created symlink: $SYSTEM_BIN -> $CARGO_BIN"
+    echo "✅ System-wide access configured successfully!"
 else
-    echo "❌ Failed to create symlink. Check permissions."
+    echo "❌ Failed to set up system-wide access. Check permissions."
     exit 1
 fi
 
 # Verify the installation
 echo
 echo "🧪 Testing installation..."
-if sudo "$SYSTEM_BIN" --version >/dev/null 2>&1; then
-    echo "✅ System-wide installation successful!"
+if sudo "$SYSTEM_BIN" --help >/dev/null 2>&1; then
+    echo "✅ Installation successful!"
     echo
     echo "🎉 You can now run: sudo monitetoring --iface any"
-    echo "   (No need for full path anymore)"
 else
     echo "❌ Installation verification failed."
     exit 1
 fi
 
 echo
-echo "📝 Note: This creates a symlink, so updates via 'cargo install monitetoring'"
-echo "   will automatically update the system-wide version too."
+echo "📝 Note: Future updates via 'cargo install monitetoring' will"
+echo "   automatically be available system-wide."
 echo
 echo "🗑️  To remove: sudo rm $SYSTEM_BIN" 

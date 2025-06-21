@@ -1,6 +1,6 @@
 [package]
 name = "monitetoring"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 license = "GPL-2.0"
 description = "A real-time per-process network bandwidth monitoring tool for Linux, inspired by nethogs. Built with Rust and featuring a terminal UI powered by ratatui."
@@ -17,10 +17,10 @@ post-install-message = """
 
 🔧 For easier sudo usage, consider one of these options:
 
-1. Create a system-wide symlink (recommended):
+1. Create a system-wide installation (recommended):
    sudo ln -sf ~/.cargo/bin/monitetoring /usr/local/bin/monitetoring
 
-2. Use the full path with sudo:
+2. Use this command with sudo:
    sudo ~/.cargo/bin/monitetoring --iface any
 
 3. Keep your PATH when using sudo:

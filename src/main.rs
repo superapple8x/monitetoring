@@ -254,8 +254,8 @@ fn check_privileges_and_provide_guidance() {
                 eprintln!("🔍 Detected installation via 'cargo install' in ~/.cargo/bin/");
                 eprintln!();
                 eprintln!("💡 Quick setup for easier sudo usage:");
-                eprintln!("   Would you like to set up system-wide access? This will create a");
-                eprintln!("   symlink in /usr/local/bin/ so you can run 'sudo monitetoring' directly.");
+                eprintln!("   Would you like to set up system-wide access? This will allow you");
+                eprintln!("   to run 'sudo monitetoring' from anywhere.");
                 eprintln!();
                 eprintln!("   Run this command:");
                 eprintln!("   curl -sSL https://raw.githubusercontent.com/superapple8x/monitetoring/main/install_system_wide.sh | bash");
@@ -273,7 +273,7 @@ fn check_privileges_and_provide_guidance() {
         }
         
         eprintln!();
-        eprintln!("   2. If installed via 'cargo install', use full path:");
+        eprintln!("   2. If installed via 'cargo install', use this command:");
         eprintln!("      sudo ~/.cargo/bin/monitetoring --iface any");
         eprintln!();
         eprintln!("   3. Set capabilities (alternative to sudo):");
@@ -307,8 +307,7 @@ fn offer_automatic_setup() -> bool {
             println!("🔍 Detected first run from ~/.cargo/bin/");
             println!();
             println!("💡 For easier sudo usage, would you like to set up system-wide access?");
-            println!("   This will create a symlink in /usr/local/bin/ so you can run");
-            println!("   'sudo monitetoring' without the full path.");
+            println!("   This will allow you to run 'sudo monitetoring' from anywhere.");
             println!();
             print!("🔧 Set up system-wide access now? [Y/n]: ");
             io::stdout().flush().unwrap();
@@ -424,12 +423,7 @@ async fn main() -> Result<(), io::Error> {
     #[cfg(target_os = "linux")]
     {
         if unsafe { libc::geteuid() } != 0 {
-            eprintln!("❌ Root privileges required on Linux!");
-            eprintln!();
-            eprintln!("This tool needs to capture network packets, which requires root access.");
-            eprintln!("Please run with sudo:");
-            eprintln!("  sudo {}", std::env::args().collect::<Vec<_>>().join(" "));
-            eprintln!();
+            check_privileges_and_provide_guidance();
             std::process::exit(1);
         }
     }

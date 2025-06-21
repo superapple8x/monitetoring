@@ -63,7 +63,7 @@ Once installed, run the application with `sudo monitetoring`.
 
 **3. (Optional) Set up system-wide access**
 
-For easier `sudo` usage without needing the full path, you can set up system-wide access:
+For easier `sudo` usage, you can set up system-wide access:
 
 ```bash
 # Download and run the system-wide installation script
@@ -73,7 +73,7 @@ curl -sSL https://raw.githubusercontent.com/superapple8x/monitetoring/main/insta
 ./install_system_wide.sh
 ```
 
-This creates a symlink in `/usr/local/bin/` so you can run `sudo monitetoring` directly without specifying the full path. The symlink automatically points to your cargo-installed version, so updates via `cargo install` will be reflected system-wide.
+This sets up system-wide access so you can run `sudo monitetoring` from anywhere. Future updates via `cargo install` will automatically be available system-wide.
 
 ---
 
@@ -427,7 +427,7 @@ For bug reports and feature requests, please use the GitHub issue tracker.
 
 ### "Command not found" when using `sudo`
 
-If you installed Monitetoring with `cargo install monitetoring` the binary is placed in `$HOME/.cargo/bin`, which is usually **not** in the `root` user's `PATH`. As a result `sudo monitetoring` may fail with *command not found* unless you provide the full path.
+If you installed Monitetoring with `cargo install monitetoring`, you may get a *command not found* error when running `sudo monitetoring`.
 
 Solutions:
 
@@ -437,7 +437,7 @@ Solutions:
    # Then you can simply run: sudo monitetoring --iface any
    ```
 
-2. Prefix the command with the full path:
+2. Use this command instead:
    ```bash
    sudo $HOME/.cargo/bin/monitetoring --iface any
    ```

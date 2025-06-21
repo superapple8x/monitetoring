@@ -14,6 +14,7 @@ fn default_frequent_connection_threshold() -> usize {
 }
 
 #[derive(Parser)]
+#[command(version)]
 pub struct Cli {
     // Accepts `--iface` (primary) and `--interface` (legacy alias for backward compatibility)
     #[arg(short = 'i', long = "iface", alias = "interface", help = "Network interface to monitor [default: any] (alias: --interface)")]
