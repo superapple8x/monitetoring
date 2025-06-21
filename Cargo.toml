@@ -10,6 +10,25 @@ readme = "README.md"
 keywords = ["network", "monitoring", "bandwidth", "linux", "tui"]
 categories = ["command-line-utilities", "network-programming"]
 
+# Post-install instructions for better sudo compatibility
+[package.metadata.install]
+post-install-message = """
+📦 Monitetoring has been installed to ~/.cargo/bin/monitetoring
+
+🔧 For easier sudo usage, consider one of these options:
+
+1. Create a system-wide symlink (recommended):
+   sudo ln -sf ~/.cargo/bin/monitetoring /usr/local/bin/monitetoring
+
+2. Use the full path with sudo:
+   sudo ~/.cargo/bin/monitetoring --iface any
+
+3. Keep your PATH when using sudo:
+   sudo -E monitetoring --iface any
+
+After option 1, you can simply run: sudo monitetoring --iface any
+"""
+
 [dependencies]
 pcap = "2.2.0"
 etherparse = "0.14.0"

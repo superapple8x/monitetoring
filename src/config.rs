@@ -16,13 +16,13 @@ fn default_frequent_connection_threshold() -> usize {
 #[derive(Parser)]
 pub struct Cli {
     // Accepts `--iface` (primary) and `--interface` (legacy alias for backward compatibility)
-    #[arg(short = 'i', long = "iface", alias = "interface")]
+    #[arg(short = 'i', long = "iface", alias = "interface", help = "Network interface to monitor [default: any] (alias: --interface)")]
     pub iface: Option<String>,
-    #[arg(long)]
+    #[arg(long, help = "Output in JSON format instead of TUI")]
     pub json: bool,
-    #[arg(long)]
+    #[arg(long, help = "Enable container detection and display")]
     pub containers: bool,
-    #[arg(long)]
+    #[arg(long, help = "Reset saved configuration and exit")]
     pub reset: bool,
 }
 
@@ -39,6 +39,8 @@ pub struct SavedConfig {
     pub large_packet_threshold: usize,
     #[serde(default = "default_frequent_connection_threshold")]
     pub frequent_connection_threshold: usize,
+    #[serde(default)]
+    pub setup_offered: bool,
 }
 
 pub fn get_config_path() -> Result<PathBuf, io::Error> {

@@ -61,6 +61,20 @@ cargo install monitetoring
 ```
 Once installed, run the application with `sudo monitetoring`.
 
+**3. (Optional) Set up system-wide access**
+
+For easier `sudo` usage without needing the full path, you can set up system-wide access:
+
+```bash
+# Download and run the system-wide installation script
+curl -sSL https://raw.githubusercontent.com/superapple8x/monitetoring/main/install_system_wide.sh | bash
+
+# Or if you have the repository cloned:
+./install_system_wide.sh
+```
+
+This creates a symlink in `/usr/local/bin/` so you can run `sudo monitetoring` directly without specifying the full path. The symlink automatically points to your cargo-installed version, so updates via `cargo install` will be reflected system-wide.
+
 ---
 
 ### Building from Source (For Developers)
@@ -417,25 +431,31 @@ If you installed Monitetoring with `cargo install monitetoring` the binary is pl
 
 Solutions:
 
-1. Prefix the command with the full path:
+1. **Set up system-wide access (recommended):**
+   ```bash
+   curl -sSL https://raw.githubusercontent.com/superapple8x/monitetoring/main/install_system_wide.sh | bash
+   # Then you can simply run: sudo monitetoring --iface any
+   ```
+
+2. Prefix the command with the full path:
    ```bash
    sudo $HOME/.cargo/bin/monitetoring --iface any
    ```
 
-2. Keep your current `PATH` when escalating privileges:
+3. Keep your current `PATH` when escalating privileges:
    ```bash
    sudo -E monitetoring --iface any
    # or
    sudo env "PATH=$PATH" monitetoring --iface any
    ```
 
-3. Add Cargo's bin directory to the `secure_path` in `/etc/sudoers` (requires root privileges):
+4. Add Cargo's bin directory to the `secure_path` in `/etc/sudoers` (requires root privileges):
    ```bash
    sudo visudo
    # Add /home/<user>/.cargo/bin to the secure_path setting, e.g.
    # Defaults    secure_path = /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/home/<user>/.cargo/bin
    ```
 
-Any of the above will allow `sudo monitetoring` to be executed without specifying the full path.
+The first option is recommended as it's permanent, automatic, and works for all users.
 
 

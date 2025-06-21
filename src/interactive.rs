@@ -4,6 +4,8 @@ use crate::config::{SavedConfig, load_config, save_config};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use std::thread;
+use std::sync::mpsc;
+use crossterm::event::{self, Event, KeyCode};
 
 
 pub struct InteractiveConfig {
@@ -136,6 +138,20 @@ impl NetworkInterface {
         }
     }
 
+    /// Returns true for pcap pseudo-devices that **do not** provide
+    /// per-process traffic mapping ("any", "nfqueue…", "usbmon…").
+    ///
+    /// ⚠️  IMPORTANT: these devices purposely receive *no* recommended-interface
+    /// badge and are sorted after real NICs so users aren't misled.
+    /// Changing this method—or the sorting code below—can cause the
+    /// interactive setup to pick "any", resulting in **zero traffic shown**
+    /// in the main UI.  Make sure to test on Linux before modifying.
+    fn is_pseudo(&self) -> bool {
+        matches!(self.name.as_str(), "any") ||
+        self.name.starts_with("nfqueue") ||
+        self.name.starts_with("usbmon")
+    }
+
     fn display_line(&self, index: usize, is_recommended: bool) -> String {
         let status = if self.is_up { "🟢" } else { "🔴" };
         let desc = self.description.as_deref().unwrap_or("No description");
@@ -173,8 +189,8 @@ impl NetworkInterface {
         let start_time = Instant::now();
         let mut total_bytes = 0u64;
 
-        // Measure for exactly 2 seconds
-        const MEASURE_DURATION_SECS: u64 = 2;
+        // Measure for exactly 5 seconds
+        const MEASURE_DURATION_SECS: u64 = 5;
         while start_time.elapsed() < Duration::from_secs(MEASURE_DURATION_SECS) {
             match cap.next_packet() {
                 Ok(packet) => {
@@ -293,6 +309,7 @@ fn save_user_config(interface: &str, json_mode: bool, containers_mode: bool, sho
         alerts: vec![], // Initialize with no alerts
         large_packet_threshold: 100_000,
         frequent_connection_threshold: 20,
+        setup_offered: false, // Will be set to true when we offer automatic setup
     };
     
     match save_config(&config) {
@@ -341,21 +358,25 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
             .map(NetworkInterface::from_device)
             .collect();
 
-        // Measure traffic on all interfaces for 2 seconds
-        const MEASURE_DURATION_SECS: u64 = 2;
+        // Measure traffic on all interfaces for 5 seconds
+        const MEASURE_DURATION_SECS: u64 = 5;
+        const OPEN_GRACE_SECS: u64 = 1; // Extra time for slow interface opens
+        let deadline = Instant::now() + Duration::from_secs(MEASURE_DURATION_SECS + OPEN_GRACE_SECS);
         println!(
-            "📊 Measuring traffic on interfaces for {} seconds...",
+            "📊 Measuring traffic on interfaces for {} seconds…",
             MEASURE_DURATION_SECS
         );
+        println!("   (Press [S] to skip and continue immediately)");
         println!("   (This helps identify the busiest interface)");
         println!();
         
         // Use threading to measure multiple interfaces concurrently
-        let mut handles = vec![];
+        let (tx, rx) = mpsc::channel();
         for interface in &mut interfaces {
             if interface.is_up {
                 let interface_name = interface.name.clone();
-                let handle = thread::spawn(move || {
+                let tx = tx.clone();
+                thread::spawn(move || {
                     let mut temp_interface = NetworkInterface {
                         name: interface_name.clone(),
                         description: None,
@@ -363,17 +384,42 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
                         traffic_bytes: 0,
                     };
                     let _ = temp_interface.measure_traffic();
-                    (interface_name, temp_interface.traffic_bytes)
+                    // Ignore send errors (main thread may timeout)
+                    let _ = tx.send((interface_name, temp_interface.traffic_bytes));
                 });
-                handles.push(handle);
             }
         }
-        
-        // Collect results
+
+        drop(tx); // Close sending side in main thread
+
+        // Collect results with overall timeout
         let mut traffic_results: HashMap<String, u64> = HashMap::new();
-        for handle in handles {
-            if let Ok((name, bytes)) = handle.join() {
-                traffic_results.insert(name, bytes);
+        loop {
+            // Allow user to skip measurement with 's' key
+            if event::poll(Duration::from_millis(0)).unwrap_or(false) {
+                if let Ok(Event::Key(k)) = event::read() {
+                    if matches!(k.code, KeyCode::Char('s') | KeyCode::Char('S')) {
+                        println!("⏭️  Skipping traffic measurement…");
+                        break;
+                    }
+                }
+            }
+
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok((name, bytes)) => {
+                    traffic_results.insert(name, bytes);
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                    // Continue waiting until deadline or skip
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    break;
+                }
             }
         }
         
@@ -384,18 +430,33 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
             }
         }
         
-        // Sort interfaces by traffic (descending), with up interfaces first
+        // Custom sorting:
+        // 1. Real NICs first, pseudo devices (see is_pseudo) last.
+        // 2. Among those, up interfaces before down ones.
+        // 3. Finally sort by observed traffic (desc).
+        //
+        // ⚠️  Be careful when changing this order: moving pseudo devices to
+        // the top or marking them as "recommended" will break the first-run
+        // experience because selecting "any" prevents per-process
+        // statistics.
         interfaces.sort_by(|a, b| {
-            match (a.is_up, b.is_up) {
-                (true, false) => std::cmp::Ordering::Less,   // Up interfaces first
-                (false, true) => std::cmp::Ordering::Greater, // Down interfaces last
-                _ => b.traffic_bytes.cmp(&a.traffic_bytes),   // Sort by traffic within same status
+            use std::cmp::Ordering::*;
+            match (a.is_pseudo(), b.is_pseudo()) {
+                (false, true) => Less,
+                (true, false) => Greater,
+                _ => {
+                    match (a.is_up, b.is_up) {
+                        (true, false) => Less,
+                        (false, true) => Greater,
+                        _ => b.traffic_bytes.cmp(&a.traffic_bytes),
+                    }
+                }
             }
         });
 
         // Display interfaces with enhanced information
         for (i, interface) in interfaces.iter().enumerate() {
-            let is_recommended = i == 0 && interface.is_up && interface.traffic_bytes > 0;
+            let is_recommended = i == 0 && interface.is_up && interface.traffic_bytes > 0 && !interface.is_pseudo();
             println!("{}", interface.display_line(i, is_recommended));
         }
         

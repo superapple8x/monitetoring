@@ -237,6 +237,146 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
     }
 }
 
+#[cfg(target_os = "linux")]
+fn check_privileges_and_provide_guidance() {
+    use std::env;
+    
+    // Check if we're running as root or with elevated privileges
+    let euid = unsafe { libc::geteuid() };
+    if euid != 0 {
+        eprintln!("⚠️  Monitetoring requires root privileges for packet capture.");
+        eprintln!();
+        
+        // Check if we're running from ~/.cargo/bin and offer automatic setup
+        if let Ok(current_exe) = env::current_exe() {
+            let current_path = current_exe.to_string_lossy();
+            if current_path.contains("/.cargo/bin/monitetoring") {
+                eprintln!("🔍 Detected installation via 'cargo install' in ~/.cargo/bin/");
+                eprintln!();
+                eprintln!("💡 Quick setup for easier sudo usage:");
+                eprintln!("   Would you like to set up system-wide access? This will create a");
+                eprintln!("   symlink in /usr/local/bin/ so you can run 'sudo monitetoring' directly.");
+                eprintln!();
+                eprintln!("   Run this command:");
+                eprintln!("   curl -sSL https://raw.githubusercontent.com/superapple8x/monitetoring/main/install_system_wide.sh | bash");
+                eprintln!();
+                eprintln!("💡 Alternative solutions:");
+            } else {
+                eprintln!("💡 Solutions:");
+            }
+            eprintln!("   1. Run with sudo:");
+            eprintln!("      sudo {} --iface any", current_exe.display());
+        } else {
+            eprintln!("💡 Solutions:");
+            eprintln!("   1. Run with sudo:");
+            eprintln!("      sudo monitetoring --iface any");
+        }
+        
+        eprintln!();
+        eprintln!("   2. If installed via 'cargo install', use full path:");
+        eprintln!("      sudo ~/.cargo/bin/monitetoring --iface any");
+        eprintln!();
+        eprintln!("   3. Set capabilities (alternative to sudo):");
+        if let Ok(current_exe) = env::current_exe() {
+            eprintln!("      sudo setcap cap_net_raw,cap_net_admin=eip {}", current_exe.display());
+        } else {
+            eprintln!("      sudo setcap cap_net_raw,cap_net_admin=eip ./monitetoring");
+        }
+        eprintln!();
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn offer_automatic_setup() -> bool {
+    use std::env;
+    use std::process::Command;
+    use std::io::{self, Write};
+    
+    // Check if we've already offered setup
+    let mut config = config::load_config();
+    if let Some(ref config) = config {
+        if config.setup_offered {
+            return false; // Already offered, don't ask again
+        }
+    }
+    
+    // Check if we're running from ~/.cargo/bin
+    if let Ok(current_exe) = env::current_exe() {
+        let current_path = current_exe.to_string_lossy();
+        if current_path.contains("/.cargo/bin/monitetoring") {
+            println!("🔍 Detected first run from ~/.cargo/bin/");
+            println!();
+            println!("💡 For easier sudo usage, would you like to set up system-wide access?");
+            println!("   This will create a symlink in /usr/local/bin/ so you can run");
+            println!("   'sudo monitetoring' without the full path.");
+            println!();
+            print!("🔧 Set up system-wide access now? [Y/n]: ");
+            io::stdout().flush().unwrap();
+            
+            let mut input = String::new();
+            io::stdin().read_line(&mut input).unwrap();
+            let input = input.trim().to_lowercase();
+            
+            // Mark that we've offered setup (create config if it doesn't exist)
+            if let Some(mut existing_config) = config {
+                existing_config.setup_offered = true;
+                let _ = config::save_config(&existing_config);
+            } else {
+                // Create a minimal config just to track that we offered setup
+                let minimal_config = config::SavedConfig {
+                    interface: "any".to_string(),
+                    json_mode: false,
+                    containers_mode: false,
+                    show_total_columns: false,
+                    alerts: vec![],
+                    large_packet_threshold: 100_000,
+                    frequent_connection_threshold: 20,
+                    setup_offered: true,
+                };
+                let _ = config::save_config(&minimal_config);
+            }
+            
+            if input.is_empty() || input == "y" || input == "yes" {
+                println!();
+                println!("🚀 Setting up system-wide access...");
+                
+                // Create the symlink directly
+                let result = Command::new("sudo")
+                    .args(&["ln", "-sf", &current_path, "/usr/local/bin/monitetoring"])
+                    .status();
+                
+                match result {
+                    Ok(status) if status.success() => {
+                        println!("✅ System-wide access set up successfully!");
+                        println!("   You can now run: sudo monitetoring --iface any");
+                        println!();
+                        return true;
+                    }
+                    Ok(_) => {
+                        println!("❌ Failed to set up system-wide access.");
+                        println!("   You can try the manual setup script later:");
+                        println!("   curl -sSL https://raw.githubusercontent.com/superapple8x/monitetoring/main/install_system_wide.sh | bash");
+                        println!();
+                    }
+                    Err(e) => {
+                        println!("❌ Error running sudo: {}", e);
+                        println!("   You can try the manual setup script later:");
+                        println!("   curl -sSL https://raw.githubusercontent.com/superapple8x/monitetoring/main/install_system_wide.sh | bash");
+                        println!();
+                    }
+                }
+            } else {
+                println!();
+                println!("⏭️  Skipping system-wide setup.");
+                println!("   You can set it up later with:");
+                println!("   curl -sSL https://raw.githubusercontent.com/superapple8x/monitetoring/main/install_system_wide.sh | bash");
+                println!();
+            }
+        }
+    }
+    false
+}
+
 #[tokio::main]
 async fn main() -> Result<(), io::Error> {
     // CRITICAL: Check dependencies FIRST, before any pcap functions are called
@@ -249,12 +389,14 @@ async fn main() -> Result<(), io::Error> {
             dependencies::DependencyChecker::display_installation_guides(&missing_deps);
             match dependencies::DependencyChecker::prompt_installation_action() {
                 Ok(true) => {
+                    // User chose to see guides and exit
                     println!("👋 Run monitetoring again after installing the required dependencies!");
                     exit(0);
                 }
                 Ok(false) => {
-                    println!("⚠️  Continuing without all dependencies - some features may not work properly.");
-                    println!();
+                    // User chose to skip and continue anyway
+                    eprintln!("⚠️  Continuing without all dependencies - packet capture may not work properly.");
+                    eprintln!("   Some features may not work as expected.");
                 }
                 Err(e) => {
                     eprintln!("Error handling user input: {}", e);
@@ -265,8 +407,17 @@ async fn main() -> Result<(), io::Error> {
     }
 
     let cli = Cli::parse();
+    
+    // Early setup offer for cargo-installed binaries (before privilege checks)
+    #[cfg(target_os = "linux")]
+    {
+        // Only offer setup if not running as root and not using --reset
+        let euid = unsafe { libc::geteuid() };
+        if euid != 0 && !cli.reset {
+            offer_automatic_setup();
+        }
+    }
 
-    // Collect startup warnings to display in the UI once it launches
     let mut startup_warning: Option<String> = None;
 
     // Check for root privileges on Linux
@@ -400,7 +551,9 @@ async fn main() -> Result<(), io::Error> {
                 #[cfg(target_os = "windows")]
                 eprintln!("🔧 Try installing Npcap from: https://npcap.com/");
                 #[cfg(target_os = "linux")]
-                eprintln!("🔧 Try: sudo setcap cap_net_raw,cap_net_admin=eip ./monitetoring");
+                {
+                    check_privileges_and_provide_guidance();
+                }
                 exit(1);
             }
         };
@@ -411,8 +564,18 @@ async fn main() -> Result<(), io::Error> {
             cap
         };
 
-        let mut cap = match cap.timeout(10).open() {
-            Ok(c) => c,
+        let mut cap = match cap.timeout(100).open() {
+            Ok(c) => {
+                // Enable non-blocking mode so next_packet() returns quickly when no traffic
+                let cap_nb = match c.setnonblock() {
+                    Ok(nonblock_cap) => nonblock_cap,
+                    Err(e) => {
+                        eprintln!("❌ Failed to set non-blocking mode on capture: {}", e);
+                        exit(1);
+                    }
+                };
+                cap_nb
+            },
             Err(e) => {
                 eprintln!("❌ Error opening packet capture: {}", e);
                 eprintln!();
@@ -425,9 +588,7 @@ async fn main() -> Result<(), io::Error> {
                 }
                 #[cfg(target_os = "linux")]
                 {
-                    eprintln!("   • Run with sudo: sudo ./monitetoring --iface {}", iface_clone);
-                    eprintln!("   • Set capabilities: sudo setcap cap_net_raw,cap_net_admin=eip ./monitetoring");
-                    eprintln!("   • Check if interface exists: ip link show");
+                    check_privileges_and_provide_guidance();
                 }
                 eprintln!("   • Try a different network interface");
                 eprintln!("   • Check if another packet capture tool is running");
@@ -445,7 +606,7 @@ async fn main() -> Result<(), io::Error> {
         let capture_start = Instant::now();
 
         loop {
-            // In JSON mode, run for a limited time (e.g., 5 seconds) then exit thread
+            // In JSON mode, check timeout at the beginning of each loop iteration
             if json_mode && capture_start.elapsed() > Duration::from_secs(5) {
                 let _ = tx.blocking_send(bandwidth_map.clone());
                 break;
@@ -581,6 +742,8 @@ async fn main() -> Result<(), io::Error> {
                 }
                 Err(_) => {
                     // Timeout or other error, continue
+                    // Small sleep to prevent busy waiting when no packets are available
+                    std::thread::sleep(Duration::from_millis(1));
                 }
             }
 
