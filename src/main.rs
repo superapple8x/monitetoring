@@ -590,6 +590,13 @@ async fn main() -> Result<(), io::Error> {
             }
         };
 
+        // NOTE [Linux -i any]: If the selected interface is the pseudo "any"
+        // interface, the kernel often delivers Linux cooked capture frames
+        // (SLL/SLL2). Proper parsing is datalink-dependent. For a future
+        // improvement, read the datalink via `cap.get_datalink()` here after
+        // activation and pass that information down so `connection_from_packet`
+        // can choose an exact parser instead of heuristic offsets.
+
         let mut bandwidth_map: HashMap<i32, ProcessInfo> = HashMap::new();
         let mut previous_bandwidth_map: HashMap<i32, ProcessInfo> = HashMap::new();
         let mut last_map_refresh = Instant::now();
@@ -789,13 +796,15 @@ async fn main() -> Result<(), io::Error> {
         display_startup_info(&iface, true, containers_mode_effective);
         
         if let Some(final_stats) = rx.recv().await {
-            // Convert to formatted version for JSON output
-            let formatted_stats: std::collections::HashMap<i32, ProcessInfoFormatted> = final_stats
+            // Convert to an array of objects that include pid to match README
+            let mut items: Vec<crate::types::ProcessInfoJson> = final_stats
                 .iter()
-                .map(|(pid, info)| (*pid, ProcessInfoFormatted::from(info)))
+                .map(|(pid, info)| crate::types::ProcessInfoJson::from((pid, info)))
                 .collect();
-            
-            if let Ok(json_output) = serde_json::to_string_pretty(&formatted_stats) {
+            // Stable order: sort by total bytes desc
+            items.sort_by(|a, b| (b.sent_bytes + b.received_bytes).cmp(&(a.sent_bytes + a.received_bytes)));
+
+            if let Ok(json_output) = serde_json::to_string_pretty(&items) {
                 println!("{}", json_output);
             }
         }

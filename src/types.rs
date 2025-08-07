@@ -148,6 +148,42 @@ impl From<&ProcessInfo> for ProcessInfoFormatted {
     }
 }
 
+/// JSON-friendly struct that includes the PID alongside the formatted process info
+#[derive(Clone, Serialize)]
+pub struct ProcessInfoJson {
+    pub pid: i32,
+    pub name: String,
+    pub sent_bytes: u64,
+    pub sent_formatted: String,
+    pub sent_rate_bytes: u64,
+    pub sent_rate_formatted: String,
+    pub received_bytes: u64,
+    pub received_formatted: String,
+    pub received_rate_bytes: u64,
+    pub received_rate_formatted: String,
+    pub container_name: Option<String>,
+    pub user_name: Option<String>,
+}
+
+impl From<(&i32, &ProcessInfo)> for ProcessInfoJson {
+    fn from((pid, info): (&i32, &ProcessInfo)) -> Self {
+        ProcessInfoJson {
+            pid: *pid,
+            name: info.name.clone(),
+            sent_bytes: info.sent,
+            sent_formatted: format_bytes(info.sent),
+            sent_rate_bytes: info.sent_rate,
+            sent_rate_formatted: format!("{}/s", format_bytes(info.sent_rate)),
+            received_bytes: info.received,
+            received_formatted: format_bytes(info.received),
+            received_rate_bytes: info.received_rate,
+            received_rate_formatted: format!("{}/s", format_bytes(info.received_rate)),
+            container_name: info.container_name.clone(),
+            user_name: info.user_name.clone(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ProcessIdentifier {
     pub pid: i32,
