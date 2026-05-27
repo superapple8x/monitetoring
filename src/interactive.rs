@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 use pcap::Device;
-use crate::config::{SavedConfig, load_config, save_config};
+use crate::config::{SavedConfig, load_config, save_config, reset_config};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use std::thread;
@@ -220,6 +220,15 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// Check whether a named network interface currently exists on the system.
+/// Returns `true` if the interface is present in the device list, `false` otherwise.
+pub fn validate_interface_exists(name: &str) -> bool {
+    match pcap::Device::list() {
+        Ok(devices) => devices.iter().any(|d| d.name == name),
+        Err(_) => false, // Can't list devices → assume not available
+    }
+}
+
 pub fn run_interactive_mode() -> Result<Option<InteractiveConfig>, io::Error> {
     // Check if we have a saved configuration
     if let Some(saved) = load_config() {
@@ -231,6 +240,18 @@ pub fn run_interactive_mode() -> Result<Option<InteractiveConfig>, io::Error> {
 }
 
 fn handle_existing_config(saved: SavedConfig) -> Result<Option<InteractiveConfig>, io::Error> {
+    // Validate that the saved interface still exists on the system.
+    // If it doesn't (e.g. USB Ethernet dongle unplugged, VPN disconnected),
+    // clear the stale config and fall through to full interactive setup.
+    if !validate_interface_exists(&saved.interface) {
+        eprintln!("⚠️  Saved interface '{}' is no longer available.", saved.interface);
+        eprintln!("🔄 Starting interactive setup to choose a new interface...");
+        eprintln!();
+        // Clear the stale config so the next run doesn't hit the same problem
+        let _ = reset_config();
+        return run_full_interactive_setup();
+    }
+
     // Windows build: force container awareness off regardless of saved setting
     let containers_mode_effective = if cfg!(windows) { false } else { saved.containers_mode };
 
@@ -538,4 +559,4 @@ fn choose_display_options() -> Result<bool, io::Error> {
     println!();
     
     InputHandler::confirm_prompt("📈 Show total columns?", false)
-} 
+}

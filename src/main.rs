@@ -27,7 +27,7 @@ use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction, PRO
 use process::{refresh_proc_maps, cleanup_dead_processes};
 use capture::connection_from_packet;
 use ui::utils::format_bytes;
-use interactive::run_interactive_mode;
+use interactive::{run_interactive_mode, validate_interface_exists};
 
 fn display_startup_info(iface: &str, is_json: bool, containers_enabled: bool) {
     eprintln!("🚀 Starting monitetoring...");
@@ -493,8 +493,9 @@ async fn main() -> Result<(), io::Error> {
         return Ok(());
     }
 
+    let was_from_cli = cli.iface.is_some();
     // Check if no arguments were provided - run interactive mode
-    let (iface, json_mode, containers_mode, show_total_columns) = if cli.iface.is_none() && !cli.json && !cli.containers {
+    let (mut iface, mut json_mode, mut containers_mode, mut show_total_columns) = if cli.iface.is_none() && !cli.json && !cli.containers {
         // No arguments provided, run interactive mode
         match run_interactive_mode()? {
             Some(config) => (config.interface, config.json_mode, config.containers_mode, config.show_total_columns),
@@ -511,6 +512,31 @@ async fn main() -> Result<(), io::Error> {
         show_interface_help();
         return Ok(());
     };
+
+    // --- Interface validation: if the chosen interface no longer exists ---
+    // (e.g. USB Ethernet dongle unplugged, VPN disconnected since last run),
+    // re-run interactive setup so the user can pick a valid one.
+    if !validate_interface_exists(&iface) {
+        if was_from_cli {
+            eprintln!("⚠️  Specified interface '{}' is not available.", iface);
+        } else {
+            eprintln!("⚠️  Interface '{}' is not available.", iface);
+        }
+        eprintln!("🔄 Starting interactive setup to choose a new interface...");
+        eprintln!();
+        // Clear any saved config so the user always sees the full setup menu,
+        // rather than silently auto-using a previously-saved interface.
+        let _ = reset_config();
+        match run_interactive_mode()? {
+            Some(config) => {
+                iface = config.interface;
+                json_mode = config.json_mode;
+                containers_mode = config.containers_mode;
+                show_total_columns = config.show_total_columns;
+            }
+            None => return Ok(()),
+        }
+    }
 
     // Apply Windows-specific override (disable container awareness)
     let containers_mode_effective = if cfg!(windows) { false } else { containers_mode };
@@ -1021,6 +1047,5 @@ async fn main() -> Result<(), io::Error> {
     }
     Ok(())
 }
-
 
 
