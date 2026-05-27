@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.3.2] - 2025-06-27
+
+### Fixed
+- Saved or CLI-specified network interfaces that become unavailable (e.g. USB Ethernet dongle unplugged, VPN disconnected) no longer cause the tool to crash with exit(1). Instead, the tool now validates the interface before starting packet capture and gracefully falls back to the interactive setup menu, allowing the user to pick a valid interface. Stale saved configs are automatically cleared to prevent repeated failures.
+
 ## [0.3.1] - 2025-06-21
 
 ### Added
