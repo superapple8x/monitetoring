@@ -1,6 +1,6 @@
 use ratatui::{
     widgets::{Block, Borders, Paragraph, Table, Row, Cell, TableState},
-    layout::{Layout, Constraint, Direction},
+    layout::{Layout, Constraint},
     style::{Style, Color, Modifier},
     Frame
 };
@@ -9,7 +9,7 @@ use crate::ui::{utils::format_bytes, charts::render_charts};
 
 /// Render the bandwidth mode view with responsive chart display
 pub fn render(f: &mut Frame, app: &App) {
-    let terminal_height = f.size().height;
+    let terminal_height = f.area().height;
     
     // Different layouts based on chart type
     match app.chart_type {
@@ -25,19 +25,14 @@ pub fn render(f: &mut Frame, app: &App) {
 /// Render the system stacked bandwidth view (no process table, more space for chart and top 5)
 fn render_system_stacked_view(f: &mut Frame, app: &App, terminal_height: u16) {
     // Layout: Title, Chart (more space), Top 5 Processes Table, Totals
-    let main_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(1)
-        .constraints(
-            [
-                Constraint::Length(3),               // Title
-                Constraint::Percentage(70),          // Chart (more space than before)
-                Constraint::Min(8),                  // Top 5 processes table
-                Constraint::Length(3),               // Totals
-            ]
-            .as_ref(),
-        )
-        .split(f.size());
+    let main_chunks = Layout::vertical([
+        Constraint::Length(3),               // Title
+        Constraint::Percentage(70),          // Chart (more space than before)
+        Constraint::Min(8),                  // Top 5 processes table
+        Constraint::Length(3),               // Totals
+    ])
+    .margin(1)
+    .split(f.area());
 
     render_title(f, main_chunks[0], terminal_height, app);
     render_charts(f, app, main_chunks[1]);
@@ -48,19 +43,14 @@ fn render_system_stacked_view(f: &mut Frame, app: &App, terminal_height: u16) {
 /// Render the process lines view (original layout with compact process table)
 fn render_process_lines_view(f: &mut Frame, app: &App, terminal_height: u16) {
     // Layout: Title, Chart (more space), Compact Top 5 Table, Totals
-    let main_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(1)
-        .constraints(
-            [
-                Constraint::Length(3),               // Title
-                Constraint::Percentage(65),          // Chart (more space)
-                Constraint::Length(8),               // Compact table (fixed height for top 5)
-                Constraint::Length(3),               // Totals
-            ]
-            .as_ref(),
-        )
-        .split(f.size());
+    let main_chunks = Layout::vertical([
+        Constraint::Length(3),               // Title
+        Constraint::Percentage(65),          // Chart (more space)
+        Constraint::Length(8),               // Compact table (fixed height for top 5)
+        Constraint::Length(3),               // Totals
+    ])
+    .margin(1)
+    .split(f.area());
 
     render_title(f, main_chunks[0], terminal_height, app);
     render_charts(f, app, main_chunks[1]);

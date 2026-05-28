@@ -1,6 +1,6 @@
 use ratatui::{
     widgets::{Block, Borders, Paragraph, Table, Row, Cell, Gauge, BarChart, Bar, BarGroup, List, ListItem, ListState},
-    layout::{Layout, Constraint, Direction},
+    layout::{Layout, Constraint},
     style::{Style, Color, Modifier},
     text::{Line, Span, Text},
     Frame
@@ -11,15 +11,13 @@ use crate::ui::utils::format_bytes;
 /// Render the system overview mode with dashboard metrics
 pub fn render(f: &mut Frame, app: &App) {
     // Main layout: Title (with navigation) + Dashboard + Alerts
-    let main_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(1)
-        .constraints([
-            Constraint::Length(3),  // Title (header with navigation)
-            Constraint::Min(0),     // Main dashboard area
-            Constraint::Length(6),  // Alert progress bars section
-        ])
-        .split(f.size());
+    let main_chunks = Layout::vertical([
+        Constraint::Length(3),  // Title (header with navigation)
+        Constraint::Min(0),     // Main dashboard area
+        Constraint::Length(6),  // Alert progress bars section
+    ])
+    .margin(1)
+    .split(f.area());
 
     render_title(f, app, main_chunks[0]);
     render_dashboard(f, app, main_chunks[1]);
@@ -44,13 +42,11 @@ fn render_title(f: &mut Frame, _app: &App, area: ratatui::layout::Rect) {
 /// Render the main dashboard area with gauge, charts, and system info
 fn render_dashboard(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Split main area vertically: gauge on top, protocol section below
-    let dashboard_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(4),  // Bandwidth gauge on top
-            Constraint::Min(0),     // Protocol section with integrated system info
-        ])
-        .split(area);
+    let dashboard_chunks = Layout::vertical([
+        Constraint::Length(4),  // Bandwidth gauge on top
+        Constraint::Min(0),     // Protocol section with integrated system info
+    ])
+    .split(area);
         
     render_bandwidth_gauge(f, app, dashboard_chunks[0]);
     render_protocol_section(f, app, dashboard_chunks[1]);
@@ -99,24 +95,20 @@ fn render_protocol_section(f: &mut Frame, app: &App, area: ratatui::layout::Rect
     f.render_widget(proto_block, area);
 
     // Split inner area: chart left, table and system info right
-    let protocol_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(60), // Chart area
-            Constraint::Percentage(40), // Table + System info area on right
-        ])
-        .split(proto_inner);
+    let protocol_chunks = Layout::horizontal([
+        Constraint::Percentage(60), // Chart area
+        Constraint::Percentage(40), // Table + System info area on right
+    ])
+    .split(proto_inner);
 
     render_protocol_chart(f, app, protocol_chunks[0]);
     
     // Split right area vertically: table top, system info bottom
-    let right_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage(70), // Protocol table
-            Constraint::Percentage(30), // System info
-        ])
-        .split(protocol_chunks[1]);
+    let right_chunks = Layout::vertical([
+        Constraint::Percentage(70), // Protocol table
+        Constraint::Percentage(30), // System info
+    ])
+    .split(protocol_chunks[1]);
     
     render_protocol_table(f, app, right_chunks[0]);
     render_system_info(f, app, right_chunks[1]);
@@ -143,22 +135,22 @@ fn render_protocol_chart(f: &mut Frame, app: &App, area: ratatui::layout::Rect) 
     let bars: Vec<Bar<'_>> = vec![
         Bar::default()
             .value(display_tcp)
-            .label("TCP".into())
+            .label(Line::from("TCP"))
             .text_value(String::new()) // hide numeric value
             .style(Style::default().fg(if total_rate > 0 { Color::Red } else { Color::DarkGray })),
         Bar::default()
             .value(display_udp)
-            .label("UDP".into())
+            .label(Line::from("UDP"))
             .text_value(String::new())
             .style(Style::default().fg(if total_rate > 0 { Color::Green } else { Color::DarkGray })),
         Bar::default()
             .value(display_icmp)
-            .label("ICMP".into())
+            .label(Line::from("ICMP"))
             .text_value(String::new())
             .style(Style::default().fg(if total_rate > 0 { Color::Yellow } else { Color::DarkGray })),
         Bar::default()
             .value(display_other)
-            .label("Other".into())
+            .label(Line::from("Other"))
             .text_value(String::new())
             .style(Style::default().fg(if total_rate > 0 { Color::Magenta } else { Color::DarkGray })),
     ];

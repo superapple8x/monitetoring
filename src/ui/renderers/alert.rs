@@ -1,6 +1,6 @@
 use ratatui::{
     widgets::{Block, Borders, Paragraph},
-    layout::{Layout, Constraint, Direction},
+    layout::{Layout, Constraint},
     style::{Style, Color, Modifier},
     text::{Line, Span, Text},
     Frame
@@ -9,19 +9,14 @@ use crate::types::{App, EditingField};
 
 /// Render the alert editing mode view
 pub fn render(f: &mut Frame, app: &App) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .margin(2)
-        .constraints(
-            [
-                Constraint::Length(3), // Title
-                Constraint::Length(3), // Threshold Input
-                Constraint::Length(3), // Command Input
-                Constraint::Min(0),    // Actions
-            ]
-            .as_ref(),
-        )
-        .split(f.size());
+    let chunks = Layout::vertical([
+        Constraint::Length(3), // Title
+        Constraint::Length(3), // Threshold Input
+        Constraint::Length(3), // Command Input
+        Constraint::Min(0),    // Actions
+    ])
+    .margin(2)
+    .split(f.area());
 
     render_title(f, app, chunks[0]);
     render_threshold_input(f, app, chunks[1]);
@@ -70,10 +65,10 @@ fn render_command_input(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 fn render_cursor(f: &mut Frame, app: &App, chunks: &[ratatui::layout::Rect]) {
     match app.current_editing_field {
         EditingField::Threshold => {
-            f.set_cursor(chunks[1].x + app.alert_input.len() as u16 + 1, chunks[1].y + 1);
+            f.set_cursor_position((chunks[1].x + app.alert_input.len() as u16 + 1, chunks[1].y + 1));
         }
         EditingField::Command => {
-            f.set_cursor(chunks[2].x + app.command_input.len() as u16 + 1, chunks[2].y + 1);
+            f.set_cursor_position((chunks[2].x + app.command_input.len() as u16 + 1, chunks[2].y + 1));
         }
     }
 }

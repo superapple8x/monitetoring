@@ -1,6 +1,6 @@
 use ratatui::{
     widgets::{Block, Borders, Paragraph, Table, Row, Cell, TableState},
-    layout::{Layout, Constraint, Direction},
+    layout::{Layout, Constraint},
     style::{Style, Color, Modifier},
     text::{Line, Span, Text},
     Frame
@@ -10,7 +10,7 @@ use crate::ui::{utils::format_bytes, charts::render_charts};
 
 /// Render the normal mode view
 pub fn render(f: &mut Frame, app: &App) {
-    let terminal_height = f.size().height;
+    let terminal_height = f.area().height;
     let is_cramped = terminal_height < 25; // Detect if we're in a cramped terminal (raised threshold)
     
     // Check if we have messages to show
@@ -29,34 +29,30 @@ pub fn render(f: &mut Frame, app: &App) {
     // Adaptive layout based on whether we have messages to show and if action panel is active
     let main_chunks = if has_messages {
         // When messages exist, allocate space exactly for them
-        Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
-                Constraint::Length(3),  // Navigation
-                Constraint::Min(0),     // Main content (Table + Action Panel)
-                if app.show_action_panel {
-                    Constraint::Length(0)
-                } else {
-                    if app.kill_notification.is_some() { Constraint::Length(6) } else { Constraint::Length(3) }
-                },
-                Constraint::Length(footer_height as u16), // Footer height based on messages
-            ])
-            .split(f.size())
+        Layout::vertical([
+            Constraint::Length(3),  // Navigation
+            Constraint::Min(0),     // Main content (Table + Action Panel)
+            if app.show_action_panel {
+                Constraint::Length(0)
+            } else {
+                if app.kill_notification.is_some() { Constraint::Length(6) } else { Constraint::Length(3) }
+            },
+            Constraint::Length(footer_height as u16), // Footer height based on messages
+        ])
+        .margin(1)
+        .split(f.area())
     } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
-                Constraint::Length(3),  // Navigation
-                Constraint::Min(0),     // Main content
-                if app.show_action_panel {
-                    Constraint::Length(0)
-                } else {
-                    if app.kill_notification.is_some() { Constraint::Length(6) } else { Constraint::Length(3) }
-                },
-            ])
-            .split(f.size())
+        Layout::vertical([
+            Constraint::Length(3),  // Navigation
+            Constraint::Min(0),     // Main content
+            if app.show_action_panel {
+                Constraint::Length(0)
+            } else {
+                if app.kill_notification.is_some() { Constraint::Length(6) } else { Constraint::Length(3) }
+            },
+        ])
+        .margin(1)
+        .split(f.area())
     };
 
     let navigation_text = if app.containers_mode {
@@ -70,14 +66,10 @@ pub fn render(f: &mut Frame, app: &App) {
 
     // When bandwidth_mode is inactive, use full width for table; otherwise split for potential side chart
     let content_chunks = if app.bandwidth_mode {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(60), Constraint::Percentage(40)].as_ref())
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
             .split(main_chunks[1])
     } else {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(100)].as_ref())
+        Layout::horizontal([Constraint::Percentage(100)])
             .split(main_chunks[1])
     };
 
@@ -94,17 +86,15 @@ pub fn render(f: &mut Frame, app: &App) {
         0 
     };
     
-    let table_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(if app.show_action_panel {
-            vec![
-                Constraint::Percentage(100 - action_panel_height), 
-                Constraint::Percentage(action_panel_height)
-            ]
-        } else {
-            vec![Constraint::Percentage(100)]
-        })
-        .split(content_chunks[0]);
+    let table_chunks = Layout::vertical(if app.show_action_panel {
+        vec![
+            Constraint::Percentage(100 - action_panel_height),
+            Constraint::Percentage(action_panel_height)
+        ]
+    } else {
+        vec![Constraint::Percentage(100)]
+    })
+    .split(content_chunks[0]);
 
     render_process_table(f, app, table_chunks[0]);
 
@@ -492,9 +482,7 @@ fn render_action_panel(f: &mut Frame, app: &App, area: ratatui::layout::Rect, is
 fn render_totals_bar(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     if let Some(kill_msg) = &app.kill_notification {
         // Split area: totals on top, kill notification below
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Length(3)].as_ref())
+        let chunks = Layout::vertical([Constraint::Length(3), Constraint::Length(3)])
             .split(area);
         
         // Render totals in top chunk
@@ -543,9 +531,7 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     
     if let Some(msg) = &app.last_alert_message {
         if let Some((timestamp, log_msg)) = recent_log_entry {
-            let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Length(3)].as_ref())
+            let chunks = Layout::vertical([Constraint::Length(3), Constraint::Length(3)])
                 .split(area);
 
             // Command execution box (top box gets the dismiss guide)

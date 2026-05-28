@@ -1,6 +1,6 @@
 use ratatui::{
     widgets::{Block, Borders, Paragraph},
-    layout::{Layout, Constraint, Direction, Alignment},
+    layout::{Layout, Constraint, Alignment},
     style::{Style, Color, Modifier},
     text::{Line, Span},
     Frame
@@ -12,24 +12,20 @@ use crate::config::load_config;
 pub fn render(f: &mut Frame, app: &App) {
     // Main layout: Title + Settings Content + Notification (if any)
     let main_chunks = if app.settings_notification.is_some() {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
-                Constraint::Length(3),  // Title header
-                Constraint::Min(0),     // Settings content
-                Constraint::Length(3),  // Notification
-            ])
-            .split(f.size())
+        Layout::vertical([
+            Constraint::Length(3),  // Title header
+            Constraint::Min(0),     // Settings content
+            Constraint::Length(3),  // Notification
+        ])
+        .margin(1)
+        .split(f.area())
     } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints([
-                Constraint::Length(3),  // Title header
-                Constraint::Min(0),     // Settings content
-            ])
-            .split(f.size())
+        Layout::vertical([
+            Constraint::Length(3),  // Title header
+            Constraint::Min(0),     // Settings content
+        ])
+        .margin(1)
+        .split(f.area())
     };
 
     render_title(f, main_chunks[0]);
@@ -55,13 +51,11 @@ fn render_title(f: &mut Frame, area: ratatui::layout::Rect) {
 /// Render the main settings content
 fn render_settings_content(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // Split into configuration info and actions
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(50), // Current configuration
-            Constraint::Percentage(50), // Available actions
-        ])
-        .split(area);
+    let chunks = Layout::horizontal([
+        Constraint::Percentage(50), // Current configuration
+        Constraint::Percentage(50), // Available actions
+    ])
+    .split(area);
 
     render_current_config(f, app, chunks[0]);
     render_available_actions(f, chunks[1]);

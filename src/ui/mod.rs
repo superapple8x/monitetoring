@@ -37,8 +37,7 @@ pub fn render_ui(app: &mut App, terminal: &mut Terminal<CrosstermBackend<io::Std
         
         if should_clear_frame {
             // Mode transition or force redraw detected - clear the frame
-            use ratatui::widgets::Clear;
-            f.render_widget(Clear, f.size());
+            f.render_widget(ratatui::widgets::Clear::default(), f.area());
         }
         
         // Reset force redraw flag after clearing

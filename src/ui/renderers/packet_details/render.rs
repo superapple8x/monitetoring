@@ -1,4 +1,4 @@
-use ratatui::{Frame, layout::{Constraint, Direction, Layout}, widgets::{Block, Borders, Paragraph, Table, Wrap}, style::{Style, Color}, text::{Span, Line}};
+use ratatui::{Frame, layout::{Constraint, Layout}, widgets::{Block, Borders, Paragraph, Table, Wrap}, style::{Style, Color}, text::{Span, Line}};
 
 use crate::types::{App, PacketDirection, PacketSortColumn, PacketSortDirection};
 
@@ -6,7 +6,7 @@ use super::{cache::ensure_packet_cache, layout::build_responsive_table_data, uti
 
 /// Render per-packet details for the selected process
 pub fn render(f: &mut Frame, app: &mut App) {
-    let area = f.size();
+    let area = f.area();
     let terminal_width = area.width;
 
     // Dynamically calculate export footer height so long paths are not truncated
@@ -27,24 +27,20 @@ pub fn render(f: &mut Frame, app: &mut App) {
 
     // Fixed footer approach with dynamic height to avoid layout jumps while showing full path
     let chunks = if app.packet_search_mode {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3), // Status/help line
-                Constraint::Length(3), // Search input bar
-                Constraint::Min(0),    // Main table
-                Constraint::Length(export_footer_height), // Export notification (dynamic)
-            ])
-            .split(area)
+        Layout::vertical([
+            Constraint::Length(3), // Status/help line
+            Constraint::Length(3), // Search input bar
+            Constraint::Min(0),    // Main table
+            Constraint::Length(export_footer_height), // Export notification (dynamic)
+        ])
+        .split(area)
     } else {
-        Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(3), // Status/help line
-                Constraint::Min(0),    // Main table
-                Constraint::Length(export_footer_height), // Export notification (dynamic)
-            ])
-            .split(area)
+        Layout::vertical([
+            Constraint::Length(3), // Status/help line
+            Constraint::Min(0),    // Main table
+            Constraint::Length(export_footer_height), // Export notification (dynamic)
+        ])
+        .split(area)
     };
 
     let mut chunk_idx = 0;
