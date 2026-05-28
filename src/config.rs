@@ -45,7 +45,7 @@ pub struct SavedConfig {
 }
 
 pub fn get_config_path() -> Result<PathBuf, io::Error> {
-    let config_dir = if let Some(config_dir) = dirs::config_dir() {
+    let config_dir = if let Some(config_dir) = dirs::config_local_dir() {
         config_dir.join("monitetoring")
     } else {
         // Fallback to home directory
