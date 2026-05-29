@@ -10,10 +10,10 @@ fn main() {
         // You need BOTH, but this build script specifically looks for the SDK.
 
         // First, check if the user has set the `NPCAP_SDK` environment variable
-        if let Ok(sdk_dir) = std::env::var("NPCAP_SDK") {
-            if try_link_from_path(&sdk_dir, "NPCAP_SDK environment variable") {
-                return;
-            }
+        if let Ok(sdk_dir) = std::env::var("NPCAP_SDK")
+            && try_link_from_path(&sdk_dir, "NPCAP_SDK environment variable")
+        {
+            return;
         }
 
         // Try to find the Npcap SDK in common installation locations

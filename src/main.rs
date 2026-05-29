@@ -23,7 +23,7 @@ use nix::unistd::Pid;
 use nix::errno::Errno;
 
 use config::{Cli, reset_config, load_config};
-use types::{App, ProcessInfo, Connection, ProcessInfoFormatted, AlertAction, PROCESS_CLEANUP_INTERVAL_SECS};
+use types::{App, ProcessInfo, Connection, AlertAction, PROCESS_CLEANUP_INTERVAL_SECS};
 use process::{refresh_proc_maps, cleanup_dead_processes};
 use capture::connection_from_packet;
 use ui::utils::format_bytes;
@@ -81,11 +81,11 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
             #[cfg(target_os = "linux")]
             {
                 // First, send the kill signal
-                match signal::kill(Pid::from_raw(pid), Signal::SIGKILL) {
+                match signal::kill(Pid::from_raw(pid), Some(Signal::SIGKILL)) {
                     Ok(_) => {
                         // Signal sent, now verify process termination
                     }
-                    Err(e) if e == Errno::ESRCH => {
+                    Err(Errno::ESRCH) => {
                         // Process already doesn't exist, which is a success in this context
                         return (true, Some(format!("💀 Process {} (PID {}) was already gone", name, pid)), None);
                     }
@@ -104,7 +104,7 @@ fn execute_alert_action(action: &AlertAction, pid: i32, name: &str, current_sent
                             // Process still exists, wait a bit
                             thread::sleep(Duration::from_millis(100));
                         }
-                        Err(e) if e == Errno::ESRCH => {
+                        Err(Errno::ESRCH) => {
                             // Process does not exist, success!
                             return (true, Some(format!("💀 Killed {} (PID {}) due to bandwidth limit", name, pid)), None);
                         }
@@ -293,12 +293,11 @@ fn offer_automatic_setup() -> bool {
     use std::io::{self, Write};
     
     // Check if we've already offered setup
-    let mut config = config::load_config();
-    if let Some(ref config) = config {
-        if config.setup_offered {
+    let config = config::load_config();
+    if let Some(ref config) = config
+        && config.setup_offered {
             return false; // Already offered, don't ask again
         }
-    }
     
     // Check if we're running from ~/.cargo/bin
     if let Ok(current_exe) = env::current_exe() {
@@ -341,7 +340,7 @@ fn offer_automatic_setup() -> bool {
                 
                 // Create the symlink directly
                 let result = Command::new("sudo")
-                    .args(&["ln", "-sf", &current_path, "/usr/local/bin/monitetoring"])
+                    .args(["ln", "-sf", &current_path, "/usr/local/bin/monitetoring"])
                     .status();
                 
                 match result {
@@ -587,14 +586,14 @@ async fn main() -> Result<(), io::Error> {
         let mut cap = match cap.timeout(100).open() {
             Ok(c) => {
                 // Enable non-blocking mode so next_packet() returns quickly when no traffic
-                let cap_nb = match c.setnonblock() {
+                
+                match c.setnonblock() {
                     Ok(nonblock_cap) => nonblock_cap,
                     Err(e) => {
                         eprintln!("❌ Failed to set non-blocking mode on capture: {}", e);
                         exit(1);
                     }
-                };
-                cap_nb
+                }
             },
             Err(e) => {
                 eprintln!("❌ Error opening packet capture: {}", e);
@@ -828,7 +827,7 @@ async fn main() -> Result<(), io::Error> {
                 .map(|(pid, info)| crate::types::ProcessInfoJson::from((pid, info)))
                 .collect();
             // Stable order: sort by total bytes desc
-            items.sort_by(|a, b| (b.sent_bytes + b.received_bytes).cmp(&(a.sent_bytes + a.received_bytes)));
+            items.sort_by_key(|b| std::cmp::Reverse(b.sent_bytes + b.received_bytes));
 
             if let Ok(json_output) = serde_json::to_string_pretty(&items) {
                 println!("{}", json_output);
@@ -871,15 +870,12 @@ async fn main() -> Result<(), io::Error> {
                 .checked_sub(last_tick.elapsed())
                 .unwrap_or_else(|| Duration::from_secs(0));
 
-            if crossterm::event::poll(timeout)? {
-                if let Event::Key(event) = event::read()? {
-                    if event.kind == crossterm::event::KeyEventKind::Press {
-                        if ui::input::handle_key_event(&mut app, event.code) {
+            if crossterm::event::poll(timeout)?
+                && let Event::Key(event) = event::read()?
+                    && event.kind == crossterm::event::KeyEventKind::Press
+                        && ui::input::handle_key_event(&mut app, event.code) {
                             break; // Exit condition
                         }
-                    }
-                }
-            }
             
             // --- Tick-based updates ---
             if last_tick.elapsed() >= tick_rate {
@@ -942,28 +938,25 @@ async fn main() -> Result<(), io::Error> {
                 ui::update_chart_datasets(&mut app);
 
                 // Cleanup alerts that have been displayed for more than 5 seconds
-                if let Some(time) = app.last_alert_message_time {
-                    if time.elapsed() > Duration::from_secs(5) {
+                if let Some(time) = app.last_alert_message_time
+                    && time.elapsed() > Duration::from_secs(5) {
                         app.last_alert_message = None;
                         app.last_alert_message_time = None;
                     }
-                }
 
                 // Cleanup kill notifications that have been displayed for more than 5 seconds
-                if let Some(time) = app.kill_notification_time {
-                    if time.elapsed() > Duration::from_secs(5) {
+                if let Some(time) = app.kill_notification_time
+                    && time.elapsed() > Duration::from_secs(5) {
                         app.kill_notification = None;
                         app.kill_notification_time = None;
                     }
-                }
 
                 // Cleanup settings notifications that have been displayed for more than 5 seconds
-                if let Some(time) = app.settings_notification_time {
-                    if time.elapsed() > Duration::from_secs(5) {
+                if let Some(time) = app.settings_notification_time
+                    && time.elapsed() > Duration::from_secs(5) {
                         app.settings_notification = None;
                         app.settings_notification_time = None;
                     }
-                }
 
                 // Enhanced export notification cleanup with state management
                 if let Some(time) = app.export_notification_time {

@@ -63,16 +63,14 @@ pub fn ensure_packet_cache(app: &mut App, pid: i32) {
     indices.retain(|&idx| {
         let p = &process_info.packet_history[idx];
         if let Some(filter) = &app.packet_filter {
-            if let Some(proto) = filter.protocol {
-                if p.protocol != proto {
+            if let Some(proto) = filter.protocol
+                && p.protocol != proto {
                     return false;
                 }
-            }
-            if let Some(dir) = filter.direction {
-                if p.direction != dir {
+            if let Some(dir) = filter.direction
+                && p.direction != dir {
                     return false;
                 }
-            }
             if let Some(re) = &filter.search_regex {
                 let search_text = format!(
                     "{}:{} {}:{}",
@@ -138,7 +136,7 @@ pub fn ensure_packet_cache(app: &mut App, pid: i32) {
         let conn_key = ConnKey::from_packet(p);
 
         // Determine if this packet belongs to a new connection group
-        if last_conn_key.as_ref().map_or(true, |k| k != &conn_key) {
+        if last_conn_key.as_ref() != Some(&conn_key) {
             bg_toggle = !bg_toggle;
             last_conn_key = Some(conn_key);
         }

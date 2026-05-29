@@ -2,7 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 use ratatui::style::Color;
-use regex;
 use crate::ui::renderers::packet_details::cache::PacketRenderCacheItem;
 
 // Process cleanup configuration
@@ -53,8 +52,10 @@ pub struct PacketInfo {
     #[serde(skip_serializing)]
     pub cached_ts: String,
     #[serde(skip_serializing)]
+    #[allow(dead_code)]
     pub cached_src: String,
     #[serde(skip_serializing)]
+    #[allow(dead_code)]
     pub cached_dst: String,
     #[serde(skip_serializing)]
     pub cached_proto: String,
@@ -116,6 +117,7 @@ pub struct ProcessInfo {
 }
 
 #[derive(Clone, Serialize)]
+#[allow(dead_code)]
 pub struct ProcessInfoFormatted {
     pub name: String,
     pub sent_bytes: u64,
@@ -280,8 +282,10 @@ pub struct App {
     pub dead_processes_cache: HashSet<i32>, // Cache of known dead processes to avoid re-checking
     pub command_execution_log: VecDeque<(Instant, String)>, // Timestamped execution log
     pub bandwidth_mode: bool,
+    #[allow(clippy::type_complexity)]
     pub system_bandwidth_history: Vec<(f64, Vec<(i32, f64, f64)>)>, // (timestamp, [(pid, sent_rate, received_rate)])
     pub chart_type: ChartType,
+    #[allow(clippy::type_complexity)]
     pub chart_datasets: Vec<(String, Vec<(f64, f64)>, ratatui::style::Color)>,
     pub process_colors: HashMap<i32, Color>,
     pub metrics_mode: MetricsMode,
@@ -435,7 +439,7 @@ impl App {
         self.system_stats = SystemStats::new();
         
         // Aggregate protocol statistics from all processes
-        for (_, process_info) in &self.stats {
+        for process_info in self.stats.values() {
             // For now, we'll estimate protocol breakdown (this should be collected from packet capture)
             // TCP is typically the majority of traffic, UDP is less, ICMP minimal
             let total_rate = process_info.sent_rate + process_info.received_rate;
@@ -477,14 +481,13 @@ impl App {
             
             // Check for system alerts that should trigger
             for (pid, alert) in &self.alerts {
-                if let AlertAction::SystemAlert = alert.action {
-                    if let Some(process_info) = self.stats.get(pid) {
+                if let AlertAction::SystemAlert = alert.action
+                    && let Some(process_info) = self.stats.get(pid) {
                         let process_bytes = process_info.sent + process_info.received;
                         if process_bytes > alert.threshold_bytes {
                             self.system_alerts.insert(*pid);
                         }
                     }
-                }
             }
         } else {
             // Reset threshold exceeded state if we're below 80% of quota

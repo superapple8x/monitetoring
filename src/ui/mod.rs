@@ -20,7 +20,7 @@ pub fn render_ui(app: &mut App, terminal: &mut Terminal<CrosstermBackend<io::Std
         // This helps reset terminal state when switching between different renderers
         use std::cell::RefCell;
         thread_local! {
-            static LAST_MODE: RefCell<Option<AppMode>> = RefCell::new(None);
+            static LAST_MODE: RefCell<Option<AppMode>> = const { RefCell::new(None) };
         }
         
         let current_mode = app.mode;
@@ -37,7 +37,7 @@ pub fn render_ui(app: &mut App, terminal: &mut Terminal<CrosstermBackend<io::Std
         
         if should_clear_frame {
             // Mode transition or force redraw detected - clear the frame
-            f.render_widget(ratatui::widgets::Clear::default(), f.area());
+            f.render_widget(ratatui::widgets::Clear, f.area());
         }
         
         // Reset force redraw flag after clearing

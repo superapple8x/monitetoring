@@ -64,7 +64,7 @@ impl DependencyChecker {
                             println!("⚠️  Continuing without all dependencies - some features may not work properly.");
                             println!("Original error: {}", e);
                             println!();
-                            return Err(format!("Packet capture unavailable: {}", e));
+                            Err(format!("Packet capture unavailable: {}", e))
                         }
                         Err(io_err) => {
                             eprintln!("Error handling user input: {}", io_err);
@@ -223,10 +223,7 @@ impl DependencyChecker {
     fn check_libpcap_linux() -> bool {
         // On Linux, pcap is usually available through the kernel
         // We can do a simple check by trying to list network devices
-        match pcap::Device::list() {
-            Ok(_) => true,
-            Err(_) => false,
-        }
+        pcap::Device::list().is_ok()
     }
     
     /// Get Npcap installation guide for Windows
@@ -369,6 +366,7 @@ impl DependencyChecker {
 }
 
 /// Integration point for the guided setup - checks dependencies and handles missing ones
+#[allow(dead_code)]
 pub fn handle_dependencies_in_setup() -> std::io::Result<bool> {
     let missing_deps = DependencyChecker::check_dependencies();
     
@@ -387,17 +385,18 @@ pub fn handle_dependencies_in_setup() -> std::io::Result<bool> {
     if show_guides {
         // User chose to see guides and exit
         println!("👋 Run monitetoring again after installing the required dependencies!");
-        return Ok(false); // Don't continue with setup
+        Ok(false)// Don't continue with setup
     } else {
         // User chose to skip and continue anyway
         println!("⚠️  Continuing without all dependencies - some features may not work properly.");
         println!();
-        return Ok(true); // Continue with setup
+        Ok(true)// Continue with setup
     }
 }
 
 /// Quick check to verify if packet capture dependencies are available
 /// Returns true if dependencies are satisfied, false otherwise
+#[allow(dead_code)]
 pub fn verify_packet_capture_dependencies() -> bool {
     DependencyChecker::check_dependencies().is_empty()
 } 

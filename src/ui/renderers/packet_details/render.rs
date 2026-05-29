@@ -18,7 +18,7 @@ pub fn render(f: &mut Frame, app: &mut App) {
             if usable_width == 0 {
                 base_footer_height
             } else {
-                let lines_needed = (msg.len() + usable_width - 1) / usable_width; // ceil division
+                let lines_needed = msg.len().div_ceil(usable_width); // ceil division
                 (lines_needed as u16 + 2).max(base_footer_height) // +2 for block borders
             }
         }

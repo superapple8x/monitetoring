@@ -45,13 +45,13 @@ regex = "1.12"
 # Linux-specific dependencies
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.18.0"
-nix = { version = "0.28.0", features = ["signal"] }
+nix = { version = "0.31", features = ["signal"] }
 libc = "0.2"
 
 # Windows-specific dependencies
 [target.'cfg(target_os = "windows")'.dependencies]
 netstat2 = "0.11"
-sysinfo = "0.30"
+sysinfo = "0.39"
 
 # Optimization profiles
 [profile.release]

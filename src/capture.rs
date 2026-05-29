@@ -45,26 +45,20 @@ pub fn connection_from_packet(packet_data: &[u8]) -> Option<Connection> {
     }
 
     // Try common decoders first
-    if let Ok(s) = SlicedPacket::from_ethernet(packet_data) {
-        if let Some(conn) = from_sliced(s) { return Some(conn); }
-    }
-    if let Ok(s) = SlicedPacket::from_ip(packet_data) {
-        if let Some(conn) = from_sliced(s) { return Some(conn); }
-    }
+    if let Ok(s) = SlicedPacket::from_ethernet(packet_data)
+        && let Some(conn) = from_sliced(s) { return Some(conn); }
+    if let Ok(s) = SlicedPacket::from_ip(packet_data)
+        && let Some(conn) = from_sliced(s) { return Some(conn); }
 
     // Heuristic fallbacks for Linux cooked capture (SLL/SLL2)
     // SLL v1: 16-byte header; SLL v2: 20-byte header. After header, IP payload starts.
     // We attempt both offsets.
-    if packet_data.len() > 16 {
-        if let Ok(s) = SlicedPacket::from_ip(&packet_data[16..]) {
-            if let Some(conn) = from_sliced(s) { return Some(conn); }
-        }
-    }
-    if packet_data.len() > 20 {
-        if let Ok(s) = SlicedPacket::from_ip(&packet_data[20..]) {
-            if let Some(conn) = from_sliced(s) { return Some(conn); }
-        }
-    }
+    if packet_data.len() > 16
+        && let Ok(s) = SlicedPacket::from_ip(&packet_data[16..])
+            && let Some(conn) = from_sliced(s) { return Some(conn); }
+    if packet_data.len() > 20
+        && let Ok(s) = SlicedPacket::from_ip(&packet_data[20..])
+            && let Some(conn) = from_sliced(s) { return Some(conn); }
 
     None
 }

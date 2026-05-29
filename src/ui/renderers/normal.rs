@@ -112,14 +112,13 @@ pub fn render(f: &mut Frame, app: &App) {
     }
     
     // Only render footer if we have messages to show
-    if has_messages {
-        if footer_height > 0 {
+    if has_messages
+        && footer_height > 0 {
             let footer_index = if !app.show_action_panel { 3 } else { 2 };
             if footer_index < main_chunks.len() {
                 render_footer(f, app, main_chunks[footer_index]);
             }
         }
-    }
 }
 
 /// Render the process table (Linux / Unix-like builds)
@@ -291,11 +290,10 @@ fn render_process_table(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 
     // Create table state and set selection to the currently selected process
     let mut table_state = TableState::default();
-    if let Some(selected_pid) = app.selected_process {
-        if let Some(index) = sorted_stats.iter().position(|(pid, _)| **pid == selected_pid) {
+    if let Some(selected_pid) = app.selected_process
+        && let Some(index) = sorted_stats.iter().position(|(pid, _)| **pid == selected_pid) {
             table_state.select(Some(index));
         }
-    }
     
     f.render_stateful_widget(table, area, &mut table_state);
 }
@@ -567,7 +565,7 @@ fn render_footer(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
     // If no messages to show, leave the space empty (removed the "No Action Executed" box)
 }
 
-fn format_alert_message(msg: &str, _show_dismiss_guide: bool) -> Paragraph {
+fn format_alert_message(msg: &str, _show_dismiss_guide: bool) -> Paragraph<'_> {
     if let Some(pos) = msg.find(':') {
         let header = &msg[..=pos];
         let body = msg[pos + 1..].trim();

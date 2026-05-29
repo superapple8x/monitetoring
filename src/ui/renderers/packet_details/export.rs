@@ -34,16 +34,14 @@ pub fn export_packets_to_csv(
         .iter()
         .filter(|p| {
             if let Some(filter) = &app.packet_filter {
-                if let Some(proto) = filter.protocol {
-                    if p.protocol != proto {
+                if let Some(proto) = filter.protocol
+                    && p.protocol != proto {
                         return false;
                     }
-                }
-                if let Some(dir) = filter.direction {
-                    if p.direction != dir {
+                if let Some(dir) = filter.direction
+                    && p.direction != dir {
                         return false;
                     }
-                }
                 if let Some(re) = &filter.search_regex {
                     let search_text = format!("{}:{} {}:{}", p.src_ip, p.src_port, p.dst_ip, p.dst_port);
                     if !re.is_match(&search_text) {

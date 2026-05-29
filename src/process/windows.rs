@@ -79,7 +79,7 @@ pub fn refresh_proc_maps(_containers_mode: bool) -> (HashMap<u64, ProcessIdentif
             
             // Process each PID associated with this socket
             for &pid in &socket_info.associated_pids {
-                let name = sys.process(sysinfo::Pid::from_u32(pid))
+                let name = sys.process(sysinfo::Pid::from(pid as usize))
                     .map(|p| p.name().to_string())
                     .unwrap_or_else(|| "???".to_string());
                 
@@ -122,7 +122,7 @@ pub fn refresh_proc_maps(_containers_mode: bool) -> (HashMap<u64, ProcessIdentif
 pub fn is_process_alive(pid: i32) -> bool {
     let mut sys = sysinfo::System::new();
     sys.refresh_processes();
-    sys.process(sysinfo::Pid::from_u32(pid as u32)).is_some()
+    sys.process(sysinfo::Pid::from(pid as usize)).is_some()
 }
 
 /// Clean up dead processes from the stats HashMap

@@ -23,7 +23,7 @@ pub fn render_charts(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
 }
 
 /// Optimized process lines chart data generation
-fn render_process_lines_chart_data(app: &App) -> (Vec<Dataset>, f64, String) {
+fn render_process_lines_chart_data(app: &App) -> (Vec<Dataset<'_>>, f64, String) {
     if let Some(pid) = app.selected_process {
         if let Some(process_info) = app.stats.get(&pid) {
             // Pre-calculate max value more efficiently
@@ -61,7 +61,7 @@ fn render_process_lines_chart_data(app: &App) -> (Vec<Dataset>, f64, String) {
 }
 
 /// Optimized system stacked chart data generation with pre-built datasets
-fn render_system_stacked_chart_data(app: &App, area: ratatui::layout::Rect) -> (Vec<Dataset>, f64, String) {
+fn render_system_stacked_chart_data(app: &App, area: ratatui::layout::Rect) -> (Vec<Dataset<'_>>, f64, String) {
     if app.chart_datasets.is_empty() {
         return (Vec::new(), 1f64, "System Bandwidth Stack (last 5 min)".to_string());
     }
@@ -169,11 +169,10 @@ fn truncate_process_name(name: &str, max_len: usize) -> String {
         if name.contains('/') {
             // For paths, keep the filename
             let parts: Vec<&str> = name.split('/').collect();
-            if let Some(filename) = parts.last() {
-                if filename.len() <= max_len {
+            if let Some(filename) = parts.last()
+                && filename.len() <= max_len {
                     return filename.to_string();
                 }
-            }
         }
         
         // Generic truncation with ellipsis
@@ -244,7 +243,7 @@ pub fn update_chart_datasets(app: &mut App) {
         })
         .collect();
 
-    process_scores.sort_by(|a, b| b.1.cmp(&a.1));
+    process_scores.sort_by_key(|b| std::cmp::Reverse(b.1));
     
     let top_pids: HashSet<i32> = process_scores.into_iter()
         .take(5)

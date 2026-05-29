@@ -429,14 +429,12 @@ fn choose_interface() -> Result<Option<String>, io::Error> {
         loop {
             // Allow user to skip measurement early with 's' key
             // This provides immediate escape if user doesn't want to wait
-            if event::poll(Duration::from_millis(0)).unwrap_or(false) {
-                if let Ok(Event::Key(k)) = event::read() {
-                    if matches!(k.code, KeyCode::Char('s') | KeyCode::Char('S')) {
+            if event::poll(Duration::from_millis(0)).unwrap_or(false)
+                && let Ok(Event::Key(k)) = event::read()
+                    && matches!(k.code, KeyCode::Char('s') | KeyCode::Char('S')) {
                         println!("⏭️  Skipping traffic measurement…");
                         break;
                     }
-                }
-            }
 
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {

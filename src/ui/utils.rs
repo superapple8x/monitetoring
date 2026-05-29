@@ -5,7 +5,7 @@ pub fn parse_input_to_bytes(input: &str) -> u64 {
     let mut unit_part = String::new();
 
     for c in input.chars() {
-        if c.is_digit(10) || c == '.' {
+        if c.is_ascii_digit() || c == '.' {
             num_part.push(c);
         } else {
             unit_part.push(c);

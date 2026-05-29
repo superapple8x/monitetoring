@@ -38,16 +38,14 @@ fn handle_alert_editing_keys(app: &mut App, key: KeyCode) -> bool {
             app.alert_input.clear();
             app.command_input.clear();
         }
-        KeyCode::Up => {
-            if app.selected_alert_action > 0 {
+        KeyCode::Up
+            if app.selected_alert_action > 0 => {
                 app.selected_alert_action -= 1;
             }
-        }
-        KeyCode::Down => {
-            if app.selected_alert_action < 2 {
+        KeyCode::Down
+            if app.selected_alert_action < 2 => {
                 app.selected_alert_action += 1;
             }
-        }
         KeyCode::Tab => {
             app.current_editing_field = match app.current_editing_field {
                 EditingField::Threshold => EditingField::Command,
@@ -111,27 +109,24 @@ fn handle_normal_mode_keys(app: &mut App, key: KeyCode) -> bool {
 /// Handle key events when action panel is shown
 fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
     let mut num_actions = 3; // Kill, Edit, Details
-    if let Some(pid) = app.selected_process {
-        if app.alerts.contains_key(&pid) {
+    if let Some(pid) = app.selected_process
+        && app.alerts.contains_key(&pid) {
             num_actions = 4; // Add Remove option
         }
-    }
 
     match key {
         KeyCode::Esc => {
             app.show_action_panel = false;
             app.selected_action = 0;
         }
-        KeyCode::Up | KeyCode::Left => {
-            if app.selected_action > 0 {
+        KeyCode::Up | KeyCode::Left
+            if app.selected_action > 0 => {
                 app.selected_action -= 1;
             }
-        }
-        KeyCode::Down | KeyCode::Right => {
-            if app.selected_action < num_actions - 1 {
+        KeyCode::Down | KeyCode::Right
+            if app.selected_action < num_actions - 1 => {
                 app.selected_action += 1;
             }
-        }
         KeyCode::Enter => {
             if let Some(pid) = app.selected_process {
                 let has_alert = app.alerts.contains_key(&pid);
@@ -148,7 +143,7 @@ fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
                         let kill_success = {
                             #[cfg(target_os = "linux")]
                             {
-                                signal::kill(Pid::from_raw(pid), Signal::SIGKILL).is_ok()
+                                signal::kill(Pid::from_raw(pid), Some(Signal::SIGKILL)).is_ok()
                             }
                             
                             #[cfg(target_os = "windows")]
@@ -234,16 +229,15 @@ fn handle_action_panel_keys(app: &mut App, key: KeyCode) -> bool {
 fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
     match key {
         KeyCode::Char('q') => return true,
-        KeyCode::Esc => {
+        KeyCode::Esc
             // Dismiss notification boxes when Esc is pressed
-            if app.last_alert_message.is_some() || !app.command_execution_log.is_empty() || app.kill_notification.is_some() {
+            if (app.last_alert_message.is_some() || !app.command_execution_log.is_empty() || app.kill_notification.is_some()) => {
                 app.last_alert_message = None;
                 app.last_alert_message_time = None;
                 app.kill_notification = None;
                 app.kill_notification_time = None;
                 app.command_execution_log.clear();
-            }
-        },
+            },
         KeyCode::Char('p') => app.sort_by = SortColumn::Pid,
         KeyCode::Char('n') => app.sort_by = SortColumn::Name,
         KeyCode::Char('u') => app.sort_by = SortColumn::User,
@@ -273,11 +267,10 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
                 app.sort_by = SortColumn::ReceivedRate;
             }
         },
-        KeyCode::Char('c') => {
-            if app.containers_mode {
+        KeyCode::Char('c')
+            if app.containers_mode => {
                 app.sort_by = SortColumn::Container;
             }
-        }
         KeyCode::Char('d') => {
             app.sort_direction = if app.sort_direction == SortDirection::Asc {
                 SortDirection::Desc
@@ -310,9 +303,9 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
                 }
             }
         }
-        KeyCode::Char('t') => {
+        KeyCode::Char('t')
             // Toggle chart type only when in bandwidth mode
-            if app.bandwidth_mode {
+            if app.bandwidth_mode => {
                 let old_chart_type = app.chart_type;
                 app.chart_type = match app.chart_type {
                     ChartType::ProcessLines => ChartType::SystemStacked,
@@ -323,10 +316,9 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
                     crate::ui::charts::update_chart_datasets(app);
                 }
             }
-        }
-        KeyCode::Char('m') => {
+        KeyCode::Char('m')
             // Toggle metrics mode only when in bandwidth mode with stacked chart
-            if app.bandwidth_mode && app.chart_type == ChartType::SystemStacked {
+            if app.bandwidth_mode && app.chart_type == ChartType::SystemStacked => {
                 app.metrics_mode = match app.metrics_mode {
                     MetricsMode::Combined => MetricsMode::SendOnly,
                     MetricsMode::SendOnly => MetricsMode::ReceiveOnly,
@@ -335,15 +327,13 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
                 // Force chart update when changing metrics mode
                 crate::ui::charts::update_chart_datasets(app);
             }
-        }
         KeyCode::Down => {
             let sorted_pids: Vec<i32> = app.sorted_stats().iter().map(|(pid, _)| **pid).collect();
             if let Some(current_pid) = app.selected_process {
-                if let Some(current_index) = sorted_pids.iter().position(|p| *p == current_pid) {
-                    if current_index < sorted_pids.len() - 1 {
+                if let Some(current_index) = sorted_pids.iter().position(|p| *p == current_pid)
+                    && current_index < sorted_pids.len() - 1 {
                         app.selected_process = Some(sorted_pids[current_index + 1]);
                     }
-                }
             } else if !sorted_pids.is_empty() {
                 app.selected_process = Some(sorted_pids[0]);
             }
@@ -351,21 +341,19 @@ fn handle_main_view_keys(app: &mut App, key: KeyCode) -> bool {
         KeyCode::Up => {
             let sorted_pids: Vec<i32> = app.sorted_stats().iter().map(|(pid, _)| **pid).collect();
             if let Some(current_pid) = app.selected_process {
-                if let Some(current_index) = sorted_pids.iter().position(|p| *p == current_pid) {
-                    if current_index > 0 {
+                if let Some(current_index) = sorted_pids.iter().position(|p| *p == current_pid)
+                    && current_index > 0 {
                         app.selected_process = Some(sorted_pids[current_index - 1]);
                     }
-                }
             } else if !sorted_pids.is_empty() {
                 app.selected_process = Some(sorted_pids[sorted_pids.len() - 1]);
             }
         }
-        KeyCode::Enter => {
-            if app.selected_process.is_some() {
+        KeyCode::Enter
+            if app.selected_process.is_some() => {
                 app.show_action_panel = true;
                 app.selected_action = 0;
             }
-        }
         _ => {}
     }
     false
@@ -391,18 +379,16 @@ fn handle_overview_mode_keys(app: &mut App, key: KeyCode) -> bool {
             // Increase quota by 100MB
             app.total_quota_threshold += 100 * 1024 * 1024;
         }
-        KeyCode::Char('-') => {
+        KeyCode::Char('-')
             // Decrease quota by 100MB (min 100MB)
-            if app.total_quota_threshold > 100 * 1024 * 1024 {
+            if app.total_quota_threshold > 100 * 1024 * 1024 => {
                 app.total_quota_threshold -= 100 * 1024 * 1024;
             }
-        }
-        KeyCode::Up => {
+        KeyCode::Up
             // Scroll up in alert list
-            if app.alert_scroll_offset > 0 {
+            if app.alert_scroll_offset > 0 => {
                 app.alert_scroll_offset -= 1;
             }
-        }
         KeyCode::Down => {
             // Scroll down in alert list
             let max_scroll = app.alerts.len().saturating_sub(1);
@@ -427,17 +413,15 @@ fn handle_settings_mode_keys(app: &mut App, key: KeyCode) -> bool {
             // Cycle from Settings back to Main mode
             app.mode = AppMode::Normal;
         }
-        KeyCode::Up => {
-            if app.settings_selected_option > 0 {
+        KeyCode::Up
+            if app.settings_selected_option > 0 => {
                 app.settings_selected_option -= 1;
             }
-        }
-        KeyCode::Down => {
+        KeyCode::Down
             // We have 2 settings for now
-            if app.settings_selected_option < 1 {
+            if app.settings_selected_option < 1 => {
                 app.settings_selected_option += 1;
             }
-        }
         KeyCode::Left => {
             if let Some(mut config) = crate::config::load_config() {
                 match app.settings_selected_option {
@@ -537,11 +521,10 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
                 }
             }
         }
-        KeyCode::Up => {
-            if app.packet_scroll_offset > 0 {
+        KeyCode::Up
+            if app.packet_scroll_offset > 0 => {
                 app.packet_scroll_offset -= 1;
             }
-        }
         KeyCode::PageUp => {
             let page = app.packet_visible_rows.max(1);
             if app.packet_scroll_offset >= page {
@@ -755,14 +738,13 @@ fn handle_packet_details_mode_keys(app: &mut App, key: KeyCode) -> bool {
             // Export filtered packets to CSV
             if let Some(pid) = app.selected_process {
                 // Clone the process info to avoid borrowing conflicts
-                if let Some(process_info) = app.stats.get(&pid).cloned() {
-                    if let Err(e) = crate::ui::renderers::packet_details::export_packets_to_csv(app, &process_info, pid) {
+                if let Some(process_info) = app.stats.get(&pid).cloned()
+                    && let Err(e) = crate::ui::renderers::packet_details::export_packets_to_csv(app, &process_info, pid) {
                         // Set error notification instead of using eprintln
                         app.export_notification_state = crate::types::NotificationState::Active(format!("❌ Export failed: {}", e));
                         app.export_notification_time = Some(std::time::Instant::now());
                         eprintln!("Export error: {}", e);
                     }
-                }
             }
         }
         _ => {}

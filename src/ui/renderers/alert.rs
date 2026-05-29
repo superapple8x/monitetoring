@@ -75,7 +75,7 @@ fn render_cursor(f: &mut Frame, app: &App, chunks: &[ratatui::layout::Rect]) {
 
 /// Render the action selection section
 fn render_actions(f: &mut Frame, app: &App, area: ratatui::layout::Rect) {
-    let actions = vec!["Kill Process", "Custom Command", "Alert"];
+    let actions = ["Kill Process", "Custom Command", "Alert"];
     let action_lines: Vec<Line> = actions
         .iter()
         .enumerate()

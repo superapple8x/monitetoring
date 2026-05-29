@@ -270,13 +270,11 @@ fn render_compact_process_table(f: &mut Frame, app: &App, area: ratatui::layout:
 
     // Create table state and set selection to the currently selected process
     let mut table_state = TableState::default();
-    if let Some(selected_pid) = app.selected_process {
-        if let Some(index) = sorted_stats.iter().position(|(pid, _)| **pid == selected_pid) {
-            if index < 5 {
+    if let Some(selected_pid) = app.selected_process
+        && let Some(index) = sorted_stats.iter().position(|(pid, _)| **pid == selected_pid)
+            && index < 5 {
                 table_state.select(Some(index));
             }
-        }
-    }
     
     f.render_stateful_widget(table, area, &mut table_state);
 }
