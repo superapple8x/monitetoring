@@ -25,6 +25,7 @@ pub fn connection_from_packet(packet_data: &[u8]) -> Option<Connection> {
                 ipv6.header().destination_addr().into(),
                 ipv6.header().next_header(),
             ),
+            _ => return None,
         };
 
         let transport = sliced.transport?;

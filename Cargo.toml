@@ -31,7 +31,7 @@ After option 1, you can simply run: sudo monitetoring --iface any
 
 [dependencies]
 pcap = "2.4.0"
-etherparse = "0.14.0"
+etherparse = "0.20.0"
 clap = { version = "4.6.1", features = ["derive"] }
 tokio = { version = "1", features = ["full"] }
 crossterm = "0.29"
